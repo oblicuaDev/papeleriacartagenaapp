@@ -2,13 +2,11 @@ import { useState } from 'react';
 import { ChevronDown, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
-import { useAuth } from '../../context/AuthContext';
 import { STATUS_STYLES, ORDER_STATUSES, formatCOP } from '../../data/mockData';
 
 export default function AdminOrders() {
-  const { orders } = useApp();
-  const { users }  = useAuth();
-  const navigate   = useNavigate();
+  const { orders, users } = useApp();
+  const navigate          = useNavigate();
   const [filterStatus, setFilterStatus] = useState('');
 
   function getName(id) {
@@ -19,7 +17,7 @@ export default function AdminOrders() {
 
   const filtered = orders
     .filter(o => filterStatus ? o.status === filterStatus : true)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
   return (
     <div className="space-y-5">
@@ -75,14 +73,14 @@ export default function AdminOrders() {
                         )}
                       </div>
                     </td>
-                    <td className="px-5 py-4 text-sm text-gray-700">{getName(order.clientId)}</td>
+                    <td className="px-5 py-4 text-sm text-gray-700">{order.clientName || getName(order.clientId)}</td>
                     <td className="px-5 py-4 text-sm text-gray-600">
                       {order.advisorId ? (
                         <span className="flex items-center gap-1.5">
                           <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center flex-shrink-0">
-                            {getName(order.advisorId).charAt(0)}
+                            {(order.advisorName || getName(order.advisorId)).charAt(0)}
                           </span>
-                          {getName(order.advisorId)}
+                          {order.advisorName || getName(order.advisorId)}
                         </span>
                       ) : (
                         <span className="text-gray-400 italic text-xs">Sin asignar</span>

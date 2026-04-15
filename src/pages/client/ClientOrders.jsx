@@ -5,8 +5,8 @@ import { useAuth } from '../../context/AuthContext';
 import { STATUS_STYLES, formatCOP } from '../../data/mockData';
 
 export default function ClientOrders() {
-  const { orders }      = useApp();
-  const { currentUser, users } = useAuth();
+  const { orders, users } = useApp();
+  const { currentUser }   = useAuth();
   const navigate        = useNavigate();
 
   // Supervisors see all orders from their company's clients
@@ -62,7 +62,7 @@ export default function ClientOrders() {
                       <td className="px-5 py-4 text-sm text-gray-600">{getClientName(order.clientId)}</td>
                     )}
                     <td className="px-5 py-4 text-sm text-gray-600">{order.createdAt}</td>
-                    <td className="px-5 py-4 text-sm text-gray-600">{order.items.length} ítem(s)</td>
+                    <td className="px-5 py-4 text-sm text-gray-600">{order.itemCount ?? (order.items || []).length} ítem(s)</td>
                     <td className="px-5 py-4 text-sm font-semibold text-gray-800">{formatCOP(order.total)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>

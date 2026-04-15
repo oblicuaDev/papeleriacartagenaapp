@@ -6,8 +6,8 @@ import OrderDetailCRM from '../../components/OrderDetailCRM';
 export default function AdvisorOrderDetail() {
   const { orderId } = useParams();
   const navigate    = useNavigate();
-  const { orders, updateOrder } = useApp();
-  const { currentUser, users }  = useAuth();
+  const { orders, updateOrder, users } = useApp();
+  const { currentUser }                = useAuth();
 
   const order = orders.find(o => o.id === orderId);
 

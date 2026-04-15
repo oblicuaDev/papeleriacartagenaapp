@@ -7,8 +7,8 @@ import { useApp } from '../../context/AppContext';
 import { formatCOP } from '../../data/mockData';
 
 export default function ClientLayout() {
-  const { currentUser, logout, users } = useAuth();
-  const { cart, cartTotal, cartCount, updateCartItem, removeFromCart, orders } = useApp();
+  const { currentUser, logout } = useAuth();
+  const { cart, cartTotal, cartCount, updateCartItem, removeFromCart, orders, users } = useApp();
 
   const isSupervisor = currentUser?.clientRole === 'supervisor';
   const companyClientIds = isSupervisor

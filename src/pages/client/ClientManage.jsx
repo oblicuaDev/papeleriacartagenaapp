@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus, X, Users, GitBranch, Edit2, Trash2, MapPin, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
+import { usersApi } from '../../services/api';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -23,8 +24,8 @@ const EMPTY_USER_FORM  = { name: '', email: '', password: '', sucursalId: '', cl
 const EMPTY_SUC_FORM   = { name: '', city: '', address: '' };
 
 export default function ClientManage() {
-  const { currentUser, users, setUsers } = useAuth();
-  const { companies, setCompanies }       = useApp();
+  const { currentUser } = useAuth();
+  const { users, refreshUsers, companies, setCompanies } = useApp();
 
   const company = companies.find(c => c.id === currentUser?.companyId);
 
@@ -37,7 +38,6 @@ export default function ClientManage() {
   const [showSucModal, setShowSucModal]  = useState(false);
   const [editingSuc, setEditingSuc]      = useState(null);
   const [sucForm, setSucForm]            = useState(EMPTY_SUC_FORM);
-  const [nextUserId, setNextUserId]      = useState(200);
   const [nextSucId, setNextSucId]        = useState(200);
 
   const inputCls = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500';
@@ -75,19 +75,18 @@ export default function ClientManage() {
     setShowUserModal(true);
   }
 
-  function handleSaveUser() {
+  async function handleSaveUser() {
     if (!userForm.name || !userForm.email || !userForm.password) return;
     if (editingUser) {
-      setUsers(prev => prev.map(u =>
-        u.id === editingUser.id
-          ? { ...u, name: userForm.name, email: userForm.email, password: userForm.password,
-              sucursalId: userForm.sucursalId ? Number(userForm.sucursalId) : null,
-              clientRole: userForm.clientRole }
-          : u
-      ));
+      await usersApi.update(editingUser.id, {
+        name:       userForm.name,
+        email:      userForm.email,
+        password:   userForm.password,
+        sucursalId: userForm.sucursalId ? Number(userForm.sucursalId) : null,
+        clientRole: userForm.clientRole,
+      });
     } else {
-      const newUser = {
-        id:          nextUserId,
+      await usersApi.create({
         name:        userForm.name,
         email:       userForm.email,
         password:    userForm.password,
@@ -96,17 +95,15 @@ export default function ClientManage() {
         companyId:   currentUser.companyId,
         sucursalId:  userForm.sucursalId ? Number(userForm.sucursalId) : null,
         priceListId: currentUser.priceListId,
-        initials:    userForm.name.substring(0, 2).toUpperCase(),
-        createdAt:   new Date().toISOString().split('T')[0],
-      };
-      setUsers(prev => [...prev, newUser]);
-      setNextUserId(n => n + 1);
+      });
     }
+    await refreshUsers();
     setShowUserModal(false);
   }
 
-  function handleDeleteUser(id) {
-    setUsers(prev => prev.filter(u => u.id !== id));
+  async function handleDeleteUser(id) {
+    await usersApi.remove(id);
+    await refreshUsers();
   }
 
   // ── Sucursal CRUD ────────────────────────────────────────────────────────

@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Package, Users, ShoppingCart, ClipboardList, CheckCircle, Box, CalendarDays, X } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { useApp } from '../../context/AppContext';
-import { useAuth } from '../../context/AuthContext';
+import { statsApi } from '../../services/api';
 import { STATUS_STYLES, formatCOP } from '../../data/mockData';
 
 const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -52,9 +52,14 @@ const inputCls = 'border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outl
 
 export default function AdminDashboard() {
   const { products, orders } = useApp();
-  const { users } = useAuth();
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo]     = useState('');
+  const [stats, setStats]       = useState(null);
+
+  // Cargar stats del servidor (clientes activos, revenue, etc.)
+  useEffect(() => {
+    statsApi.admin().then(setStats).catch(() => {});
+  }, []);
 
   const isFiltered = dateFrom || dateTo;
 
@@ -65,24 +70,26 @@ export default function AdminDashboard() {
     return true;
   }
 
-  const filtered = orders.filter(o => inRange(o.createdAt));
+  const filtered = (orders || []).filter(o => inRange(o.createdAt || o.created_at || ''));
 
-  const clients       = users.filter(u => u.role === 'client');
-  const pendingOrders = filtered.filter(o => o.status === 'Pendiente').length;
+  const activeClients   = stats?.activeClients ?? '…';
+  const pendingOrders   = filtered.filter(o => o.status === 'Pendiente').length;
   const deliveredOrders = filtered.filter(o => o.status === 'Entregado');
-  const deliveredPct  = filtered.length > 0
+  const deliveredPct    = filtered.length > 0
     ? Math.round((deliveredOrders.length / filtered.length) * 100)
     : 0;
+  // items puede no estar en el listado (solo en detalle), usar itemCount como fallback
   const deliveredUnits = deliveredOrders.reduce(
-    (sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0
+    (sum, o) => sum + (o.items?.reduce((s, i) => s + i.quantity, 0) ?? o.itemCount ?? 0), 0
   );
 
   const recentOrders = [...filtered]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
     .slice(0, 5);
 
+  // Top productos: solo si los items están disponibles
   const productQtyMap = {};
-  filtered.forEach(o => o.items.forEach(item => {
+  filtered.forEach(o => (o.items || []).forEach(item => {
     if (!productQtyMap[item.productId]) {
       productQtyMap[item.productId] = { productId: item.productId, name: item.productName, qty: 0 };
     }
@@ -95,13 +102,13 @@ export default function AdminDashboard() {
   const monthlyMap = {};
   MONTHS.forEach((_, i) => { monthlyMap[i] = 0; });
   filtered.forEach(o => {
-    const month = new Date(o.createdAt).getMonth();
-    if (!isNaN(month)) monthlyMap[month] = (monthlyMap[month] || 0) + o.total;
+    const month = new Date(o.createdAt || o.created_at).getMonth();
+    if (!isNaN(month)) monthlyMap[month] = (monthlyMap[month] || 0) + (o.total || 0);
   });
   const chartData = MONTHS.map((name, i) => ({ name, total: monthlyMap[i] }));
 
-  function getClientName(clientId) {
-    return users.find(u => u.id === clientId)?.name || 'Desconocido';
+  function getClientName(order) {
+    return order.clientName || 'Desconocido';
   }
 
   return (
@@ -172,7 +179,7 @@ export default function AdminDashboard() {
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard label="Total Productos"    value={products.length}  icon={Package}       color="bg-blue-500"   />
-        <StatCard label="Total Clientes"     value={clients.length}   icon={Users}         color="bg-emerald-500"/>
+        <StatCard label="Total Clientes"     value={activeClients}    icon={Users}         color="bg-emerald-500"/>
         <StatCard label="Pedidos Pendientes" value={pendingOrders}    icon={ShoppingCart}  color="bg-yellow-500" />
         <StatCard label="Total Pedidos"      value={filtered.length}  icon={ClipboardList} color="bg-purple-500" />
       </div>
@@ -234,8 +241,8 @@ export default function AdminDashboard() {
                   return (
                     <tr key={order.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 text-sm font-mono font-medium text-blue-700">{order.id}</td>
-                      <td className="px-6 py-4 text-sm text-gray-700">{getClientName(order.clientId)}</td>
-                      <td className="px-6 py-4 text-sm text-gray-500">{order.createdAt}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{getClientName(order)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-500">{(order.createdAt || '').slice(0, 10)}</td>
                       <td className="px-6 py-4 text-sm font-medium text-gray-800">{formatCOP(order.total)}</td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>

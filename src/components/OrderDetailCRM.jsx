@@ -310,7 +310,7 @@ export default function OrderDetailCRM({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {order.items.map((item, idx) => (
+                  {(order.items || []).map((item, idx) => (
                     <tr key={idx} className="hover:bg-gray-50 transition-colors">
                       <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{getSku(item.productId)}</td>
                       <td className="px-5 py-3 text-sm font-medium text-gray-800">{item.productName}</td>
@@ -496,11 +496,11 @@ export default function OrderDetailCRM({
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Items</span>
-                <span className="font-medium text-gray-700">{order.items.length}</span>
+                <span className="font-medium text-gray-700">{(order.items || []).length}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Unidades</span>
-                <span className="font-medium text-gray-700">{order.items.reduce((s, i) => s + i.quantity, 0)}</span>
+                <span className="font-medium text-gray-700">{(order.items || []).reduce((s, i) => s + i.quantity, 0)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">Total</span>

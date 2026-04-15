@@ -45,8 +45,8 @@ function HighlightCard({ label, value, sub, icon: Icon, bg, text }) {
 }
 
 export default function AdvisorOrders() {
-  const { orders } = useApp();
-  const { currentUser, users } = useAuth();
+  const { orders, users } = useApp();
+  const { currentUser }   = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('all');
   const [dateFrom, setDateFrom]   = useState('');
@@ -69,12 +69,12 @@ export default function AdvisorOrders() {
     ? Math.round((deliveredOrders.length / myOrders.length) * 100)
     : 0;
   const deliveredUnits = deliveredOrders.reduce(
-    (sum, o) => sum + o.items.reduce((s, i) => s + i.quantity, 0), 0
+    (sum, o) => sum + (o.items || []).reduce((s, i) => s + i.quantity, 0), 0
   );
 
   // Top 10 productos
   const productQtyMap = {};
-  myOrders.forEach(o => o.items.forEach(item => {
+  myOrders.forEach(o => (o.items || []).forEach(item => {
     if (!productQtyMap[item.productId]) {
       productQtyMap[item.productId] = { productId: item.productId, name: item.productName, qty: 0 };
     }
@@ -97,8 +97,8 @@ export default function AdvisorOrders() {
     return order.status === activeTab;
   }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  function getClientName(clientId) {
-    return users.find(u => u.id === clientId)?.name || '—';
+  function getClientName(order) {
+    return order.clientName || users.find(u => u.id === order.clientId)?.name || '—';
   }
 
   return (
@@ -204,9 +204,9 @@ export default function AdvisorOrders() {
                 return (
                   <tr key={order.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-5 py-4 text-sm font-mono font-medium text-blue-700">{order.id}</td>
-                    <td className="px-5 py-4 text-sm text-gray-700">{getClientName(order.clientId)}</td>
+                    <td className="px-5 py-4 text-sm text-gray-700">{getClientName(order)}</td>
                     <td className="px-5 py-4 text-sm text-gray-500">{order.createdAt}</td>
-                    <td className="px-5 py-4 text-sm text-gray-600">{order.items.length}</td>
+                    <td className="px-5 py-4 text-sm text-gray-600">{(order.items || []).length}</td>
                     <td className="px-5 py-4 text-sm font-medium text-gray-800">{formatCOP(order.total)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>

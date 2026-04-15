@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Pencil, X, Upload, ListOrdered } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useAuth } from '../../context/AuthContext';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -22,8 +21,7 @@ function Modal({ title, onClose, children }) {
 const LIST_COLORS = ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500'];
 
 export default function AdminPriceLists() {
-  const { priceLists, setPriceLists } = useApp();
-  const { users } = useAuth();
+  const { priceLists, setPriceLists, users } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editList, setEditList] = useState(null);
@@ -67,7 +65,8 @@ export default function AdminPriceLists() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         {priceLists.map((list, idx) => {
-          const discount = Math.round((1 - list.multiplier) * 100);
+          const multiplier = parseFloat(list.multiplier);
+          const discount = Math.round((1 - multiplier) * 100);
           return (
             <div key={list.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               <div className={`h-2 ${LIST_COLORS[idx % LIST_COLORS.length]}`} />
@@ -90,7 +89,7 @@ export default function AdminPriceLists() {
                 <div className="space-y-3">
                   <div className="flex justify-between items-center py-2 border-b border-gray-50">
                     <span className="text-sm text-gray-600">Multiplicador</span>
-                    <span className="text-sm font-bold text-gray-800">{list.multiplier.toFixed(2)}x</span>
+                    <span className="text-sm font-bold text-gray-800">{multiplier.toFixed(2)}x</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-gray-50">
                     <span className="text-sm text-gray-600">Descuento</span>
@@ -106,7 +105,7 @@ export default function AdminPriceLists() {
 
                 <div className="mt-4 bg-gray-50 rounded-lg p-3">
                   <p className="text-xs text-gray-500">
-                    Ejemplo: Producto $100.000 → <span className="font-semibold text-gray-700">${(100000 * list.multiplier).toLocaleString('es-CO')}</span>
+                    Ejemplo: Producto $100.000 → <span className="font-semibold text-gray-700">${(100000 * multiplier).toLocaleString('es-CO')}</span>
                   </p>
                 </div>
               </div>

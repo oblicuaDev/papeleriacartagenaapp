@@ -54,7 +54,7 @@ function ConfirmApproveModal({ order, onConfirm, onCancel }) {
 }
 
 function OrderDetailModal({ order, clientName, onApprove, onReject, onClose }) {
-  const total = order.items.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
+  const total = (order.items || []).reduce((s, i) => s + i.unitPrice * i.quantity, 0);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -85,7 +85,7 @@ function OrderDetailModal({ order, clientName, onApprove, onReject, onClose }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {order.items.map((item, idx) => (
+                {(order.items || []).map((item, idx) => (
                   <tr key={idx}>
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-800">{item.productName}</p>
@@ -139,8 +139,8 @@ function OrderDetailModal({ order, clientName, onApprove, onReject, onClose }) {
 }
 
 export default function ClientApproveOrders() {
-  const { currentUser, users } = useAuth();
-  const { orders, updateOrder } = useApp();
+  const { currentUser } = useAuth();
+  const { orders, updateOrder, users } = useApp();
   const [selectedOrder, setSelectedOrder]       = useState(null);
   const [confirmOrder, setConfirmOrder]         = useState(null); // order pending confirm modal
 
@@ -205,7 +205,7 @@ export default function ClientApproveOrders() {
         <div className="space-y-3">
           {pendingOrders.map(order => {
             const clientName = getClientName(order.clientId);
-            const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
+            const itemCount = (order.items || []).reduce((s, i) => s + i.quantity, 0);
             return (
               <div key={order.id} className="bg-white rounded-xl shadow-sm border border-gray-100 px-5 py-4 flex items-center gap-4">
                 <div className="w-10 h-10 bg-rose-50 text-rose-500 rounded-xl flex items-center justify-center flex-shrink-0">

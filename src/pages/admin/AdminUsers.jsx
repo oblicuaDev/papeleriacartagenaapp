@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Plus, X } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
+import { usersApi } from '../../services/api';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -22,11 +22,9 @@ function Modal({ title, onClose, children }) {
 const EMPTY_FORM = { name: '', email: '', password: '', branchId: '' };
 
 export default function AdminUsers() {
-  const { users, setUsers } = useAuth();
-  const { branches } = useApp();
+  const { users, refreshUsers, branches } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [nextId, setNextId] = useState(20);
 
   const advisors = users.filter(u => u.role === 'advisor');
 
@@ -39,19 +37,16 @@ export default function AdminUsers() {
     setShowModal(true);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name || !form.email || !form.password) return;
-    const newAdvisor = {
-      id: nextId,
-      name: form.name,
-      email: form.email,
+    await usersApi.create({
+      name:     form.name,
+      email:    form.email,
       password: form.password,
-      role: 'advisor',
+      role:     'advisor',
       branchId: Number(form.branchId),
-      initials: form.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase(),
-    };
-    setUsers(prev => [...prev, newAdvisor]);
-    setNextId(n => n + 1);
+    });
+    await refreshUsers();
     setShowModal(false);
   }
 

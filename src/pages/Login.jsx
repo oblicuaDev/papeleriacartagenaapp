@@ -13,21 +13,20 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     setLoading(true);
-    setTimeout(() => {
-      const result = login(email, password);
-      if (result.success) {
-        if (result.role === 'admin') navigate('/admin');
-        else if (result.role === 'advisor') navigate('/asesor');
-        else if (result.role === 'client') navigate('/cliente');
-      } else {
-        setError('Credenciales incorrectas. Verifica tu email y contraseña.');
-      }
+    try {
+      const result = await login(email, password);
+      if (result.role === 'admin')   navigate('/admin');
+      else if (result.role === 'advisor') navigate('/asesor');
+      else if (result.role === 'client')  navigate('/cliente');
+    } catch (err) {
+      setError(err.data?.error || 'Credenciales incorrectas. Verifica tu email y contraseña.');
+    } finally {
       setLoading(false);
-    }, 400);
+    }
   }
 
   return (

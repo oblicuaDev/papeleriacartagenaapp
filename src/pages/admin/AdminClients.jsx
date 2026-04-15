@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Plus, X, Phone, MapPin, Calendar, Building, GitBranch } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
+import { usersApi } from '../../services/api';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -25,11 +25,9 @@ const EMPTY_FORM = {
 };
 
 export default function AdminClients() {
-  const { users, setUsers } = useAuth();
-  const { priceLists, companies } = useApp();
+  const { users, refreshUsers, priceLists, companies } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [nextId, setNextId] = useState(10);
 
   const clients = users.filter(u => u.role === 'client');
 
@@ -60,26 +58,22 @@ export default function AdminClients() {
     setForm(f => ({ ...f, companyId: e.target.value, sucursalId: '' }));
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name || !form.email || !form.password) return;
-    const newClient = {
-      id: nextId,
-      name: form.name,
+    await usersApi.create({
+      name:        form.name,
       contactName: form.contactName,
-      email: form.email,
-      password: form.password,
-      phone: form.phone,
-      address: form.address,
+      email:       form.email,
+      password:    form.password,
+      phone:       form.phone,
+      address:     form.address,
       priceListId: Number(form.priceListId),
-      companyId: form.companyId ? Number(form.companyId) : null,
-      sucursalId: form.sucursalId ? Number(form.sucursalId) : null,
-      clientRole: form.clientRole,
-      role: 'client',
-      initials: form.name.substring(0, 2).toUpperCase(),
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    setUsers(prev => [...prev, newClient]);
-    setNextId(n => n + 1);
+      companyId:   form.companyId ? Number(form.companyId) : null,
+      sucursalId:  form.sucursalId ? Number(form.sucursalId) : null,
+      clientRole:  form.clientRole,
+      role:        'client',
+    });
+    await refreshUsers();
     setShowModal(false);
   }
 

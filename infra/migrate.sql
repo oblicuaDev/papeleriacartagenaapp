@@ -266,11 +266,38 @@ ALTER TABLE companies
         REFERENCES price_lists(id) ON DELETE RESTRICT;
 
 -- ----------------------------------------------------------
+-- 14. order_status_log — Auditoria de cambios de estado (PHASE 4)
+-- ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS order_status_log (
+    id          SERIAL      PRIMARY KEY,
+    order_id    VARCHAR(20) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    from_status VARCHAR(50),
+    to_status   VARCHAR(50) NOT NULL,
+    changed_by  INTEGER     REFERENCES users(id) ON DELETE SET NULL,
+    reason      TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_osl_to_status CHECK (
+        to_status IN (
+            'Pendiente por aprobar',
+            'Rechazado',
+            'Pendiente',
+            'Validar disponibilidad',
+            'Alistamiento',
+            'En Ruta',
+            'Entregado'
+        )
+    ),
+    CONSTRAINT chk_osl_distinct CHECK (from_status IS DISTINCT FROM to_status)
+);
+
+-- ----------------------------------------------------------
 -- Índices de rendimiento
 -- ----------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_companies_price_list     ON companies(price_list_id);
 CREATE INDEX IF NOT EXISTS idx_pli_product              ON price_list_items(product_id);
 CREATE INDEX IF NOT EXISTS idx_pli_price_list           ON price_list_items(price_list_id);
+CREATE INDEX IF NOT EXISTS idx_osl_order                ON order_status_log(order_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_osl_changed_by           ON order_status_log(changed_by);
 CREATE INDEX IF NOT EXISTS idx_sucursales_company       ON sucursales(company_id);
 CREATE INDEX IF NOT EXISTS idx_users_company            ON users(company_id);
 CREATE INDEX IF NOT EXISTS idx_users_sucursal           ON users(sucursal_id);

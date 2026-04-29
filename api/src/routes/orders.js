@@ -306,6 +306,13 @@ router.post('/', requireRole('client'), async (req, res) => {
       );
     }
 
+    // PHASE 4: log de creacion (from_status NULL = evento de creacion)
+    await client.query(
+      `INSERT INTO order_status_log (order_id, from_status, to_status, changed_by)
+       VALUES ($1, NULL, $2, $3)`,
+      [newId, initialStatus, clientId]
+    );
+
     await client.query('COMMIT');
     return res.status(201).json({
       id:          newId,
@@ -324,64 +331,115 @@ router.post('/', requireRole('client'), async (req, res) => {
 });
 
 // PUT /orders/:id
+// PHASE 4:
+//   - Transaccion + SELECT FOR UPDATE para evitar race conditions en transiciones.
+//   - Validacion estricta de transiciones (ya existente, ahora atomica con el UPDATE).
+//   - Log de cambio de estado en order_status_log.
+//   - 'Rechazado' requiere campo `reason`.
 router.put('/:id', async (req, res) => {
   const { role, id: myId, companyId } = req.user;
   const clientRole = req.user.clientRole;
   const orderId = req.params.id.toUpperCase();
-  const { status, carrier, advisorId } = req.body;
+  const { status, carrier, advisorId, reason } = req.body;
 
+  // Sanidad temprana antes de abrir transaccion
+  if (status === 'Rechazado' && (!reason || !reason.trim())) {
+    return res.status(422).json({ error: 'reason es obligatorio para rechazar un pedido' });
+  }
+
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query('BEGIN');
+
+    // Lock de fila para serializar transiciones concurrentes
+    const { rows } = await client.query(
       `SELECT o.*, uc.company_id AS client_company_id
        FROM orders o
        JOIN users uc ON uc.id = o.client_id
-       WHERE o.id = $1`,
+       WHERE o.id = $1
+       FOR UPDATE OF o`,
       [orderId]
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (!rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Pedido no encontrado' });
+    }
     const order = rows[0];
 
-    // Validar transición de estado
-    if (status && status !== order.status) {
+    const statusChanges = status !== undefined && status !== order.status;
+
+    // Validar transicion de estado
+    if (statusChanges) {
       let allowedTransitions = [];
-      if (role === 'admin') allowedTransitions = VALID_TRANSITIONS.admin[order.status] || [];
-      else if (role === 'advisor') allowedTransitions = VALID_TRANSITIONS.advisor[order.status] || [];
-      else if (role === 'client' && clientRole === 'supervisor') {
-        // Supervisor solo puede aprobar pedidos de su empresa
+      if (role === 'admin') {
+        allowedTransitions = VALID_TRANSITIONS.admin[order.status] || [];
+      } else if (role === 'advisor') {
+        // Advisor solo puede tocar pedidos asignados a el (o sin asignar -> se auto-asigna)
+        if (order.advisor_id && order.advisor_id !== myId) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Pedido asignado a otro asesor' });
+        }
+        allowedTransitions = VALID_TRANSITIONS.advisor[order.status] || [];
+      } else if (role === 'client' && clientRole === 'supervisor') {
         if (order.client_company_id !== companyId) {
+          await client.query('ROLLBACK');
           return res.status(403).json({ error: 'No autorizado para aprobar pedidos de otra empresa' });
         }
         allowedTransitions = VALID_TRANSITIONS.supervisor[order.status] || [];
       } else {
+        await client.query('ROLLBACK');
         return res.status(403).json({ error: 'No autorizado para cambiar este estado' });
       }
 
       if (!allowedTransitions.includes(status)) {
-        return res.status(422).json({ error: `Transición de estado inválida: ${order.status} → ${status}` });
+        await client.query('ROLLBACK');
+        return res.status(422).json({
+          error: `Transicion de estado invalida: ${order.status} -> ${status}`,
+          allowed: allowedTransitions,
+        });
       }
     }
 
+    // Construir UPDATE dinamico
     const fields = [];
     const params = [];
     if (status   !== undefined) fields.push(`status    = $${params.push(status)}`);
     if (carrier  !== undefined) fields.push(`carrier   = $${params.push(carrier)}`);
     if (advisorId !== undefined && role === 'admin') fields.push(`advisor_id = $${params.push(advisorId)}`);
 
-    // Auto-asignar advisor si es la primera vez que toca el pedido
+    // Auto-asignar advisor en su primer toque (solo si no estaba asignado)
     if (role === 'advisor' && !order.advisor_id) {
       fields.push(`advisor_id = $${params.push(myId)}`);
     }
 
-    if (!fields.length) return res.status(422).json({ error: 'No hay campos para actualizar' });
+    if (!fields.length) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({ error: 'No hay campos para actualizar' });
+    }
 
     params.push(orderId);
-    const { rows: updated } = await pool.query(
-      `UPDATE orders SET ${fields.join(', ')} WHERE id = $${params.length} RETURNING *`, params
+    const { rows: updated } = await client.query(
+      `UPDATE orders SET ${fields.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params
     );
+
+    // Log del cambio de estado (solo si efectivamente cambio)
+    if (statusChanges) {
+      await client.query(
+        `INSERT INTO order_status_log (order_id, from_status, to_status, changed_by, reason)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [orderId, order.status, status, myId, reason?.trim() || null]
+      );
+    }
+
+    await client.query('COMMIT');
     return res.json(updated[0]);
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    client.release();
   }
 });
 

@@ -269,9 +269,22 @@ CREATE TRIGGER trg_pli_updated_at
 
 -- ----------------------------------------------------------
 -- companies.price_list_id — vinculo empresa -> lista de precios
--- (se agrega aqui porque price_lists ya existe)
+-- companies.advisor_id    — asesor por defecto de la empresa (PHASE 9)
+-- sucursales.advisor_id   — override de asesor por sucursal (PHASE 9)
+-- sucursales.price_list_id — override de lista por sucursal (PHASE 9)
+-- (se agregan aqui porque price_lists, users y sucursales ya existen)
 -- ----------------------------------------------------------
 ALTER TABLE companies
+    ADD COLUMN IF NOT EXISTS price_list_id INTEGER
+        REFERENCES price_lists(id) ON DELETE RESTRICT;
+ALTER TABLE companies
+    ADD COLUMN IF NOT EXISTS advisor_id INTEGER
+        REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE sucursales
+    ADD COLUMN IF NOT EXISTS advisor_id INTEGER
+        REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE sucursales
     ADD COLUMN IF NOT EXISTS price_list_id INTEGER
         REFERENCES price_lists(id) ON DELETE RESTRICT;
 
@@ -304,6 +317,9 @@ CREATE TABLE IF NOT EXISTS order_status_log (
 -- Índices de rendimiento
 -- ----------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_companies_price_list     ON companies(price_list_id);
+CREATE INDEX IF NOT EXISTS idx_companies_advisor        ON companies(advisor_id);
+CREATE INDEX IF NOT EXISTS idx_sucursales_advisor       ON sucursales(advisor_id);
+CREATE INDEX IF NOT EXISTS idx_sucursales_price_list    ON sucursales(price_list_id);
 CREATE INDEX IF NOT EXISTS idx_pli_product              ON price_list_items(product_id);
 CREATE INDEX IF NOT EXISTS idx_pli_price_list           ON price_list_items(price_list_id);
 CREATE INDEX IF NOT EXISTS idx_osl_order                ON order_status_log(order_id, created_at);

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { resolvePriceListId, priceSqlFragment } from '../lib/pricing.js';
+import { resolvePriceListId, priceSqlFragment, resolveOrderRouting } from '../lib/pricing.js';
 import { ensurePurchaseOrderPdf } from '../lib/purchaseOrderPdf.js';
 
 const router = Router();
@@ -341,11 +341,10 @@ router.post('/', requireRole('client'), async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Resolver lista aplicable al cliente (company > user)
-    const orderPriceListId = await resolvePriceListId(
-      { companyId, userId: clientId },
-      client
-    );
+    // PHASE 9: routing del pedido (sucursal > company > user para precio,
+    // sucursal > company para asesor) en una sola query
+    const { priceListId: orderPriceListId, advisorId: orderAdvisorId } =
+      await resolveOrderRouting(clientId, client);
 
     const { select: priceSelect, join: priceJoin } = priceSqlFragment({
       alias: 'p',
@@ -416,11 +415,11 @@ router.post('/', requireRole('client'), async (req, res) => {
     const { rows: idRows } = await client.query(`SELECT fn_generate_order_id() AS id`);
     const newId = idRows[0].id;
 
-    // Crear pedido
+    // Crear pedido (PHASE 9: pre-asignar advisor segun routing de empresa/sucursal)
     await client.query(
-      `INSERT INTO orders (id, client_id, status, notes, total)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [newId, clientId, initialStatus, notes || null, total]
+      `INSERT INTO orders (id, client_id, advisor_id, status, notes, total)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [newId, clientId, orderAdvisorId, initialStatus, notes || null, total]
     );
 
     // Insertar items (snapshot frozen)
@@ -445,6 +444,7 @@ router.post('/', requireRole('client'), async (req, res) => {
       status:      initialStatus,
       total,
       priceListId: orderPriceListId,
+      advisorId:   orderAdvisorId,
       createdAt:   new Date().toISOString(),
     });
   } catch (err) {

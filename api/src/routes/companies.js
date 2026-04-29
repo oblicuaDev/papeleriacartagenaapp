@@ -5,6 +5,31 @@ import { requireAuth, requireRole, requireAdminOrSupervisor } from '../middlewar
 const router = Router();
 router.use(requireAuth);
 
+// PHASE 9: validar que advisorId apunte a un usuario role='advisor' activo
+async function assertAdvisorOrNull(advisorId) {
+  if (advisorId === null || advisorId === undefined) return;
+  const { rows } = await pool.query(
+    `SELECT role, active FROM users WHERE id = $1`, [advisorId]
+  );
+  if (!rows[0])         throw httpError(422, 'advisorId no existe');
+  if (rows[0].role !== 'advisor') throw httpError(422, 'advisorId debe ser un usuario con role=advisor');
+  if (!rows[0].active)  throw httpError(422, 'advisorId esta inactivo');
+}
+
+async function assertPriceListOrNull(priceListId) {
+  if (priceListId === null || priceListId === undefined) return;
+  const { rows } = await pool.query(
+    `SELECT id FROM price_lists WHERE id = $1`, [priceListId]
+  );
+  if (!rows[0]) throw httpError(422, 'priceListId no existe');
+}
+
+function httpError(status, message) {
+  const e = new Error(message);
+  e.status = status;
+  return e;
+}
+
 // GET /companies
 router.get('/', requireAdminOrSupervisor, async (req, res) => {
   try {
@@ -45,16 +70,27 @@ router.get('/', requireAdminOrSupervisor, async (req, res) => {
 
 // POST /companies
 router.post('/', requireRole('admin'), async (req, res) => {
-  const { name, nit, email, phone, address, active = true } = req.body;
+  const {
+    name, nit, email, phone, address, active = true,
+    advisorId, priceListId,
+  } = req.body;
   if (!name) return res.status(422).json({ error: 'name es requerido' });
+
   try {
+    await assertAdvisorOrNull(advisorId);
+    await assertPriceListOrNull(priceListId);
+
     const { rows } = await pool.query(
-      `INSERT INTO companies (name, nit, email, phone, address, active)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [name, nit || null, email || null, phone || null, address || null, active]
+      `INSERT INTO companies (name, nit, email, phone, address, active, advisor_id, price_list_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [
+        name, nit || null, email || null, phone || null, address || null, active,
+        advisorId ?? null, priceListId ?? null,
+      ]
     );
     return res.status(201).json(rows[0]);
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     if (err.code === '23505') return res.status(409).json({ error: 'NIT ya registrado' });
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
@@ -89,16 +125,21 @@ router.get('/:id', requireAdminOrSupervisor, async (req, res) => {
 // PUT /companies/:id
 router.put('/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id);
-  const { name, nit, email, phone, address, active } = req.body;
+  const { name, nit, email, phone, address, active, advisorId, priceListId } = req.body;
   try {
+    if (advisorId !== undefined)   await assertAdvisorOrNull(advisorId);
+    if (priceListId !== undefined) await assertPriceListOrNull(priceListId);
+
     const fields = [];
     const params = [];
-    if (name    !== undefined) fields.push(`name    = $${params.push(name)}`);
-    if (nit     !== undefined) fields.push(`nit     = $${params.push(nit)}`);
-    if (email   !== undefined) fields.push(`email   = $${params.push(email)}`);
-    if (phone   !== undefined) fields.push(`phone   = $${params.push(phone)}`);
-    if (address !== undefined) fields.push(`address = $${params.push(address)}`);
-    if (active  !== undefined) fields.push(`active  = $${params.push(active)}`);
+    if (name        !== undefined) fields.push(`name          = $${params.push(name)}`);
+    if (nit         !== undefined) fields.push(`nit           = $${params.push(nit)}`);
+    if (email       !== undefined) fields.push(`email         = $${params.push(email)}`);
+    if (phone       !== undefined) fields.push(`phone         = $${params.push(phone)}`);
+    if (address     !== undefined) fields.push(`address       = $${params.push(address)}`);
+    if (active      !== undefined) fields.push(`active        = $${params.push(active)}`);
+    if (advisorId   !== undefined) fields.push(`advisor_id    = $${params.push(advisorId)}`);
+    if (priceListId !== undefined) fields.push(`price_list_id = $${params.push(priceListId)}`);
     if (!fields.length) return res.status(422).json({ error: 'No hay campos para actualizar' });
 
     params.push(id);
@@ -109,6 +150,7 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     if (!rows[0]) return res.status(404).json({ error: 'Empresa no encontrada' });
     return res.json(rows[0]);
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
     if (err.code === '23505') return res.status(409).json({ error: 'NIT ya registrado' });
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });

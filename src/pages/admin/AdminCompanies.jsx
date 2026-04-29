@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, X, Building, GitBranch, ChevronDown, ChevronUp, Phone, MapPin, Edit2, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { companiesApi, sucursalesApi } from '../../services/api';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -22,7 +23,7 @@ const EMPTY_COMPANY = { name: '', nit: '', email: '', phone: '', address: '' };
 const EMPTY_SUCURSAL = { name: '', address: '', city: '' };
 
 export default function AdminCompanies() {
-  const { companies, setCompanies } = useApp();
+  const { companies, refreshCompanies } = useApp();
   const [expandedId, setExpandedId] = useState(null);
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState(null);
@@ -31,8 +32,6 @@ export default function AdminCompanies() {
   const [sucursalTargetCompanyId, setSucursalTargetCompanyId] = useState(null);
   const [editingSucursal, setEditingSucursal] = useState(null);
   const [sucursalForm, setSucursalForm] = useState(EMPTY_SUCURSAL);
-  const [nextCompanyId, setNextCompanyId] = useState(100);
-  const [nextSucursalId, setNextSucursalId] = useState(100);
 
   const inputClass = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
   const labelClass = 'block text-sm font-medium text-gray-700 mb-1';
@@ -50,26 +49,21 @@ export default function AdminCompanies() {
     setShowCompanyModal(true);
   }
 
-  function handleSaveCompany() {
+  async function handleSaveCompany() {
     if (!companyForm.name) return;
     if (editingCompany) {
-      setCompanies(prev => prev.map(c => c.id === editingCompany.id ? { ...c, ...companyForm } : c));
+      await companiesApi.update(editingCompany.id, companyForm);
     } else {
-      const newCompany = {
-        id: nextCompanyId,
-        ...companyForm,
-        active: true,
-        sucursales: [],
-      };
-      setCompanies(prev => [...prev, newCompany]);
-      setNextCompanyId(n => n + 1);
+      await companiesApi.create(companyForm);
     }
+    await refreshCompanies();
     setShowCompanyModal(false);
   }
 
-  function handleDeleteCompany(id) {
-    setCompanies(prev => prev.filter(c => c.id !== id));
+  async function handleDeleteCompany(id) {
+    await companiesApi.remove(id);
     if (expandedId === id) setExpandedId(null);
+    await refreshCompanies();
   }
 
   // ── Sucursal CRUD ─────────────────────────────────────────────────────────
@@ -87,27 +81,20 @@ export default function AdminCompanies() {
     setShowSucursalModal(true);
   }
 
-  function handleSaveSucursal() {
+  async function handleSaveSucursal() {
     if (!sucursalForm.name) return;
-    setCompanies(prev => prev.map(c => {
-      if (c.id !== sucursalTargetCompanyId) return c;
-      if (editingSucursal) {
-        return {
-          ...c,
-          sucursales: c.sucursales.map(s => s.id === editingSucursal.id ? { ...s, ...sucursalForm } : s),
-        };
-      }
-      const newSuc = { id: nextSucursalId, ...sucursalForm, active: true };
-      setNextSucursalId(n => n + 1);
-      return { ...c, sucursales: [...c.sucursales, newSuc] };
-    }));
+    if (editingSucursal) {
+      await sucursalesApi.update(sucursalTargetCompanyId, editingSucursal.id, sucursalForm);
+    } else {
+      await sucursalesApi.create(sucursalTargetCompanyId, sucursalForm);
+    }
+    await refreshCompanies();
     setShowSucursalModal(false);
   }
 
-  function handleDeleteSucursal(companyId, sucursalId) {
-    setCompanies(prev => prev.map(c =>
-      c.id === companyId ? { ...c, sucursales: c.sucursales.filter(s => s.id !== sucursalId) } : c
-    ));
+  async function handleDeleteSucursal(companyId, sucursalId) {
+    await sucursalesApi.remove(companyId, sucursalId);
+    await refreshCompanies();
   }
 
   return (

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pencil, X, Upload, ListOrdered } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { priceListsApi } from '../../services/api';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -21,7 +22,7 @@ function Modal({ title, onClose, children }) {
 const LIST_COLORS = ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500'];
 
 export default function AdminPriceLists() {
-  const { priceLists, setPriceLists, users } = useApp();
+  const { priceLists, users, refreshPriceLists } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editList, setEditList] = useState(null);
@@ -39,9 +40,10 @@ export default function AdminPriceLists() {
     setShowModal(true);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name || !form.multiplier) return;
-    setPriceLists(prev => prev.map(pl => pl.id === editList.id ? { ...pl, ...form, multiplier: Number(form.multiplier) } : pl));
+    await priceListsApi.update(editList.id, { ...form, multiplier: Number(form.multiplier) });
+    await refreshPriceLists();
     setShowModal(false);
   }
 

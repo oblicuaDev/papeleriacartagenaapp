@@ -5,6 +5,9 @@ import {
   ordersApi, companiesApi, catalogApi, usersApi,
 } from '../services/api';
 
+// Exported so detail pages can fetch a full order without polluting context
+export { ordersApi };
+
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
@@ -158,6 +161,21 @@ export function AppProvider({ children }) {
     setCompanies(res);
   }
 
+  async function refreshCategories() {
+    const res = await categoriesApi.list();
+    setCategories(res || []);
+  }
+
+  async function refreshBranches() {
+    const res = await branchesApi.list();
+    setBranches(res || []);
+  }
+
+  async function refreshPriceLists() {
+    const res = await priceListsApi.list();
+    setPriceLists(res || []);
+  }
+
   async function refreshUsers(params = {}) {
     const res = await usersApi.list({ limit: 200, ...params });
     setUsers(res);
@@ -180,6 +198,7 @@ export function AppProvider({ children }) {
       addToCart, updateCartItem, removeFromCart, clearCart,
       submitOrder, updateOrder,
       refreshOrders, refreshProducts, refreshCompanies, refreshUsers,
+      refreshCategories, refreshBranches, refreshPriceLists,
     }}>
       {children}
     </AppContext.Provider>

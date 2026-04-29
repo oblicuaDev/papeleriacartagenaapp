@@ -9,6 +9,7 @@ const pool = new Pool({
   database: process.env.DB_NAME     || 'papeleria_db',
   user:     process.env.DB_USER     || 'papeleria_user',
   password: process.env.DB_PASS,
+  ssl:      process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,

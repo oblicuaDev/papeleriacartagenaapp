@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Pencil, Eye, EyeOff, X, Tag } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { categoriesApi } from '../../services/api';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -27,11 +28,11 @@ const CATEGORY_COLORS = [
 ];
 
 export default function AdminCategories() {
-  const { categories, setCategories, products } = useApp();
+  const { categories, products, refreshCategories } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editCat, setEditCat] = useState(null);
   const [form, setForm] = useState({ name: '', description: '', active: true });
-  const [nextId, setNextId] = useState(6);
+  const [saving, setSaving] = useState(false);
 
   function getProductCount(catId) {
     return products.filter(p => p.categoryId === catId).length;
@@ -49,19 +50,27 @@ export default function AdminCategories() {
     setShowModal(true);
   }
 
-  function handleSave() {
-    if (!form.name) return;
-    if (editCat) {
-      setCategories(prev => prev.map(c => c.id === editCat.id ? { ...c, ...form } : c));
-    } else {
-      setCategories(prev => [...prev, { id: nextId, ...form }]);
-      setNextId(n => n + 1);
+  async function handleSave() {
+    if (!form.name || saving) return;
+    setSaving(true);
+    try {
+      if (editCat) {
+        await categoriesApi.update(editCat.id, form);
+      } else {
+        await categoriesApi.create(form);
+      }
+      await refreshCategories();
+      setShowModal(false);
+    } finally {
+      setSaving(false);
     }
-    setShowModal(false);
   }
 
-  function toggleActive(id) {
-    setCategories(prev => prev.map(c => c.id === id ? { ...c, active: !c.active } : c));
+  async function toggleActive(id) {
+    const cat = categories.find(c => c.id === id);
+    if (!cat) return;
+    await categoriesApi.update(id, { active: !cat.active });
+    await refreshCategories();
   }
 
   const inputClass = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';

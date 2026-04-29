@@ -3,11 +3,9 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import pool from '../config/db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { tokenBlacklist } from '../lib/tokenBlacklist.js';
 
 const router = Router();
-
-// Blacklist en memoria (en producción usar Redis)
-const tokenBlacklist = new Set();
 
 // POST /auth/login
 router.post('/login', async (req, res) => {
@@ -106,5 +104,4 @@ router.get('/me', requireAuth, async (req, res) => {
   }
 });
 
-export { tokenBlacklist };
 export default router;

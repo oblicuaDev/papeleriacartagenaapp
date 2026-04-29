@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Plus, X, Users, GitBranch, Edit2, Trash2, MapPin, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
-import { usersApi } from '../../services/api';
+import { usersApi, sucursalesApi } from '../../services/api';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -25,7 +25,7 @@ const EMPTY_SUC_FORM   = { name: '', city: '', address: '' };
 
 export default function ClientManage() {
   const { currentUser } = useAuth();
-  const { users, refreshUsers, companies, setCompanies } = useApp();
+  const { users, refreshUsers, companies, refreshCompanies } = useApp();
 
   const company = companies.find(c => c.id === currentUser?.companyId);
 
@@ -119,26 +119,21 @@ export default function ClientManage() {
     setShowSucModal(true);
   }
 
-  function handleSaveSuc() {
+  async function handleSaveSuc() {
     if (!sucForm.name) return;
-    setCompanies(prev => prev.map(c => {
-      if (c.id !== currentUser.companyId) return c;
-      if (editingSuc) {
-        return { ...c, sucursales: c.sucursales.map(s => s.id === editingSuc.id ? { ...s, ...sucForm } : s) };
-      }
-      const newSuc = { id: nextSucId, ...sucForm, active: true };
-      setNextSucId(n => n + 1);
-      return { ...c, sucursales: [...c.sucursales, newSuc] };
-    }));
+    const companyId = currentUser.companyId;
+    if (editingSuc) {
+      await sucursalesApi.update(companyId, editingSuc.id, sucForm);
+    } else {
+      await sucursalesApi.create(companyId, sucForm);
+    }
+    await refreshCompanies();
     setShowSucModal(false);
   }
 
-  function handleDeleteSuc(id) {
-    setCompanies(prev => prev.map(c =>
-      c.id === currentUser.companyId
-        ? { ...c, sucursales: c.sucursales.filter(s => s.id !== id) }
-        : c
-    ));
+  async function handleDeleteSuc(id) {
+    await sucursalesApi.remove(currentUser.companyId, id);
+    await refreshCompanies();
   }
 
   if (!company) {

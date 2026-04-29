@@ -1,14 +1,60 @@
-import { useState } from 'react';
-import { Plus, Search, Pencil, Eye, EyeOff, Upload, X, Filter, Camera, Link2 } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Plus, Search, Pencil, Eye, EyeOff, Upload, X, Filter, Camera, Link2, CheckCircle2, AlertCircle, FileSpreadsheet, Loader2 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import productFallback from '../../product.webp';
 import { useApp } from '../../context/AppContext';
+import { productsApi } from '../../services/api';
 import { formatCOP } from '../../data/mockData';
+
+const UNITS = ['Unidad', 'Resma', 'Caja', 'Paquete', 'Pliego', 'Set', 'Rollo'];
+
+function parseExcelRows(workbook, categories) {
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+  const catMap = {};
+  categories.forEach(c => { catMap[c.name.toLowerCase().trim()] = c.id; });
+
+  return raw.map((row, i) => {
+    // Normalize keys: trim + lowercase for matching
+    const get = (...keys) => {
+      for (const k of keys) {
+        const found = Object.keys(row).find(rk => rk.trim().toLowerCase() === k.toLowerCase());
+        if (found !== undefined) return String(row[found]).trim();
+      }
+      return '';
+    };
+
+    const sku = get('sku', 'código', 'codigo', 'ref', 'referencia');
+    const name = get('nombre', 'name', 'producto');
+    const categoryRaw = get('categoría', 'categoria', 'category');
+    const description = get('descripción', 'descripcion', 'description', 'desc');
+    const basePriceRaw = get('precio base', 'precio', 'price', 'basePrice', 'valor');
+    const stockRaw = get('stock', 'inventario', 'cantidad');
+    const unitRaw = get('unidad', 'unit', 'unidad de medida');
+
+    const basePrice = parseFloat(String(basePriceRaw).replace(/[^0-9.]/g, '')) || 0;
+    const stock = parseInt(String(stockRaw).replace(/[^0-9]/g, ''), 10) || 0;
+    const unit = UNITS.find(u => u.toLowerCase() === unitRaw.toLowerCase()) || 'Unidad';
+    const categoryId = catMap[categoryRaw.toLowerCase().trim()] || null;
+
+    const errors = [];
+    if (!sku) errors.push('SKU requerido');
+    if (!name) errors.push('Nombre requerido');
+    if (!categoryId) errors.push(`Categoría "${categoryRaw}" no encontrada`);
+    if (!basePrice) errors.push('Precio base inválido');
+
+    return { _row: i + 2, sku, name, categoryRaw, categoryId, description, basePrice, stock, unit, errors };
+  });
+}
 
 const EMPTY_FORM = {
   name: '', sku: '', categoryId: '', description: '',
   basePrice: '', stock: '', unit: 'Unidad', active: true, image: null,
   complementaryIds: [],
 };
+
+const IMPORT_STEPS = { UPLOAD: 'upload', PREVIEW: 'preview', DONE: 'done' };
 
 function Modal({ title, onClose, children }) {
   return (
@@ -27,15 +73,22 @@ function Modal({ title, onClose, children }) {
 }
 
 export default function AdminProducts() {
-  const { products, setProducts, categories } = useApp();
+  const { products, setProducts, categories, refreshProducts } = useApp();
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [nextId, setNextId] = useState(21);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [crossSearch, setCrossSearch] = useState('');
+  const [importStep, setImportStep] = useState(IMPORT_STEPS.UPLOAD);
+  const [importRows, setImportRows] = useState([]);
+  const [importFileName, setImportFileName] = useState('');
+  const [importDoneCount, setImportDoneCount] = useState(0);
+  const [importing, setImporting] = useState(false);
+  const importFileRef = useRef(null);
 
   const filtered = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase());
@@ -51,6 +104,7 @@ export default function AdminProducts() {
     setEditProduct(null);
     setForm(EMPTY_FORM);
     setCrossSearch('');
+    setSaveError('');
     setShowModal(true);
   }
 
@@ -69,6 +123,7 @@ export default function AdminProducts() {
       complementaryIds: product.complementaryIds || [],
     });
     setCrossSearch('');
+    setSaveError('');
     setShowModal(true);
   }
 
@@ -80,25 +135,103 @@ export default function AdminProducts() {
     reader.readAsDataURL(file);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name || !form.sku || !form.categoryId || !form.basePrice) return;
+    setSaving(true);
+    setSaveError('');
     const payload = {
-      ...form,
-      categoryId: Number(form.categoryId),
-      basePrice: Number(form.basePrice),
-      stock: Number(form.stock),
+      name:             form.name,
+      sku:              form.sku,
+      categoryId:       Number(form.categoryId),
+      description:      form.description,
+      basePrice:        Number(form.basePrice),
+      stock:            Number(form.stock),
+      unit:             form.unit,
+      active:           form.active,
+      complementaryIds: form.complementaryIds,
     };
-    if (editProduct) {
-      setProducts(prev => prev.map(p => p.id === editProduct.id ? { ...p, ...payload } : p));
-    } else {
-      setProducts(prev => [...prev, { id: nextId, ...payload }]);
-      setNextId(n => n + 1);
+    try {
+      if (editProduct) {
+        await productsApi.update(editProduct.id, payload);
+      } else {
+        await productsApi.create(payload);
+      }
+      await refreshProducts();
+      setShowModal(false);
+    } catch (err) {
+      setSaveError(err.message || 'Error al guardar el producto');
+    } finally {
+      setSaving(false);
     }
-    setShowModal(false);
   }
 
-  function toggleActive(id) {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, active: !p.active } : p));
+  async function toggleActive(id) {
+    const product = products.find(p => p.id === id);
+    if (!product) return;
+    try {
+      await productsApi.update(id, { active: !product.active });
+      await refreshProducts();
+    } catch (err) {
+      console.error('toggleActive error:', err);
+    }
+  }
+
+  function openImport() {
+    setImportStep(IMPORT_STEPS.UPLOAD);
+    setImportRows([]);
+    setImportFileName('');
+    setImportDoneCount(0);
+    setShowImport(true);
+  }
+
+  function handleImportFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImportFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const wb = XLSX.read(ev.target.result, { type: 'array' });
+      const rows = parseExcelRows(wb, categories);
+      setImportRows(rows);
+      setImportStep(IMPORT_STEPS.PREVIEW);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  async function handleConfirmImport() {
+    const valid = importRows.filter(r => r.errors.length === 0);
+    setImporting(true);
+    let created = 0;
+    const failed = [];
+    for (const r of valid) {
+      try {
+        await productsApi.create({
+          name:        r.name,
+          sku:         r.sku,
+          categoryId:  r.categoryId,
+          description: r.description,
+          basePrice:   r.basePrice,
+          stock:       r.stock,
+          unit:        r.unit,
+          active:      true,
+          complementaryIds: [],
+        });
+        created++;
+      } catch (err) {
+        failed.push({ sku: r.sku, reason: err.message });
+      }
+    }
+    await refreshProducts();
+    setImporting(false);
+    setImportDoneCount(created);
+    // Marcar en preview las filas que fallaron en la API
+    if (failed.length) {
+      setImportRows(prev => prev.map(r => {
+        const f = failed.find(x => x.sku === r.sku);
+        return f ? { ...r, errors: [...r.errors, `API: ${f.reason}`] } : r;
+      }));
+    }
+    setImportStep(IMPORT_STEPS.DONE);
   }
 
   const inputClass = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
@@ -113,7 +246,7 @@ export default function AdminProducts() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => setShowImport(true)}
+            onClick={openImport}
             className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition"
           >
             <Upload className="w-4 h-4" />
@@ -297,7 +430,7 @@ export default function AdminProducts() {
               <div>
                 <label className={labelClass}>Unidad</label>
                 <select className={inputClass} value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}>
-                  {['Unidad', 'Resma', 'Caja', 'Paquete', 'Pliego', 'Set', 'Rollo'].map(u => <option key={u}>{u}</option>)}
+                  {UNITS.map(u => <option key={u}>{u}</option>)}
                 </select>
               </div>
             </div>
@@ -384,11 +517,18 @@ export default function AdminProducts() {
               <input type="checkbox" id="active" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} className="rounded" />
               <label htmlFor="active" className="text-sm text-gray-700">Producto activo</label>
             </div>
+            {saveError && (
+              <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                {saveError}
+              </div>
+            )}
             <div className="flex gap-3 pt-2">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
+              <button onClick={() => setShowModal(false)} disabled={saving} className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition disabled:opacity-50">
                 Cancelar
               </button>
-              <button onClick={handleSave} className="flex-1 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition">
+              <button onClick={handleSave} disabled={saving} className="flex-1 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition disabled:opacity-50 flex items-center justify-center gap-2">
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                 {editProduct ? 'Guardar Cambios' : 'Crear Producto'}
               </button>
             </div>
@@ -398,33 +538,137 @@ export default function AdminProducts() {
 
       {/* Import Modal */}
       {showImport && (
-        <Modal title="Importar Productos desde Excel" onClose={() => setShowImport(false)}>
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600">
-              Selecciona un archivo Excel (.xlsx) con el formato de productos. Las columnas deben ser: SKU, Nombre, Categoría, Descripción, Precio Base, Stock, Unidad.
-            </p>
-            <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-blue-400 transition">
-              <Upload className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-              <p className="text-sm text-gray-500 mb-2">Arrastra tu archivo aquí o</p>
-              <label className="cursor-pointer">
-                <span className="text-sm font-medium text-blue-600 hover:text-blue-700">Seleccionar archivo</span>
-                <input type="file" accept=".xlsx,.xls,.csv" className="hidden" />
+        <Modal
+          title="Importar Productos desde Excel"
+          onClose={() => setShowImport(false)}
+        >
+          {/* ── Step 1: Upload ── */}
+          {importStep === IMPORT_STEPS.UPLOAD && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600 space-y-1">
+                <p className="font-medium text-gray-700 mb-1">Columnas esperadas en la primera hoja:</p>
+                <p><span className="font-mono bg-white border border-gray-200 px-1 rounded">SKU</span> · <span className="font-mono bg-white border border-gray-200 px-1 rounded">Nombre</span> · <span className="font-mono bg-white border border-gray-200 px-1 rounded">Categoría</span> · <span className="font-mono bg-white border border-gray-200 px-1 rounded">Descripción</span> · <span className="font-mono bg-white border border-gray-200 px-1 rounded">Precio Base</span> · <span className="font-mono bg-white border border-gray-200 px-1 rounded">Stock</span> · <span className="font-mono bg-white border border-gray-200 px-1 rounded">Unidad</span></p>
+                <p className="mt-1">Categorías disponibles: {categories.map(c => c.name).join(', ')}</p>
+                <p>Unidades válidas: {UNITS.join(', ')}</p>
+              </div>
+
+              <label
+                className="flex flex-col items-center gap-3 border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:border-blue-400 hover:bg-blue-50 transition cursor-pointer"
+                onClick={() => importFileRef.current?.click()}
+              >
+                <FileSpreadsheet className="w-12 h-12 text-gray-300" />
+                <span className="text-sm text-gray-500">Arrastra tu archivo aquí o <span className="text-blue-600 font-medium">selecciona un archivo</span></span>
+                <span className="text-xs text-gray-400">.xlsx, .xls, .csv</span>
               </label>
-            </div>
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
-              <p className="text-xs text-blue-700">
-                Esta es una demostración. El archivo no será procesado realmente.
-              </p>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setShowImport(false)} className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+
+              <button onClick={() => setShowImport(false)} className="w-full py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
                 Cancelar
               </button>
-              <button onClick={() => setShowImport(false)} className="flex-1 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition">
-                Importar (Demo)
+            </div>
+          )}
+
+          {/* ── Step 2: Preview ── */}
+          {importStep === IMPORT_STEPS.PREVIEW && (() => {
+            const valid = importRows.filter(r => r.errors.length === 0);
+            const invalid = importRows.filter(r => r.errors.length > 0);
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="flex items-center gap-1.5 text-green-700 font-medium">
+                    <CheckCircle2 className="w-4 h-4" /> {valid.length} válidos
+                  </span>
+                  {invalid.length > 0 && (
+                    <span className="flex items-center gap-1.5 text-red-600 font-medium">
+                      <AlertCircle className="w-4 h-4" /> {invalid.length} con errores
+                    </span>
+                  )}
+                  <span className="text-gray-400 text-xs ml-auto truncate max-w-[160px]">{importFileName}</span>
+                </div>
+
+                <div className="border border-gray-200 rounded-lg overflow-hidden max-h-72 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="text-left px-3 py-2 text-gray-500 font-semibold">Fila</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-semibold">SKU</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-semibold">Nombre</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-semibold">Categoría</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-semibold">Precio</th>
+                        <th className="text-left px-3 py-2 text-gray-500 font-semibold">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {importRows.map((r, i) => (
+                        <tr key={i} className={r.errors.length ? 'bg-red-50' : 'bg-white'}>
+                          <td className="px-3 py-1.5 text-gray-400">{r._row}</td>
+                          <td className="px-3 py-1.5 font-mono text-gray-600">{r.sku || <span className="text-red-400 italic">—</span>}</td>
+                          <td className="px-3 py-1.5 text-gray-700 max-w-[120px] truncate">{r.name || <span className="text-red-400 italic">—</span>}</td>
+                          <td className="px-3 py-1.5 text-gray-600">{r.categoryRaw || <span className="text-red-400 italic">—</span>}</td>
+                          <td className="px-3 py-1.5 text-gray-600">{r.basePrice ? formatCOP(r.basePrice) : <span className="text-red-400 italic">—</span>}</td>
+                          <td className="px-3 py-1.5">
+                            {r.errors.length === 0
+                              ? <CheckCircle2 className="w-4 h-4 text-green-500" />
+                              : (
+                                <span className="text-red-500 flex items-start gap-1">
+                                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                                  <span>{r.errors.join(', ')}</span>
+                                </span>
+                              )
+                            }
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {invalid.length > 0 && (
+                  <p className="text-xs text-gray-500">Las filas con errores serán omitidas. Solo se importarán las {valid.length} filas válidas.</p>
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setImportStep(IMPORT_STEPS.UPLOAD)}
+                    className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition"
+                  >
+                    Volver
+                  </button>
+                  <button
+                    onClick={handleConfirmImport}
+                    disabled={valid.length === 0 || importing}
+                    className="flex-1 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {importing && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {importing ? 'Importando...' : `Importar ${valid.length} producto${valid.length !== 1 ? 's' : ''}`}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Step 3: Done ── */}
+          {importStep === IMPORT_STEPS.DONE && (
+            <div className="text-center space-y-4 py-4">
+              <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto" />
+              <div>
+                <p className="text-lg font-semibold text-gray-800">{importDoneCount} producto{importDoneCount !== 1 ? 's' : ''} importado{importDoneCount !== 1 ? 's' : ''}</p>
+                <p className="text-sm text-gray-500 mt-1">Los productos ya están disponibles en el catálogo.</p>
+              </div>
+              <button
+                onClick={() => setShowImport(false)}
+                className="w-full py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition"
+              >
+                Cerrar
               </button>
             </div>
-          </div>
+          )}
         </Modal>
       )}
     </div>

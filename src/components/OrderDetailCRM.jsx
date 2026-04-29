@@ -13,6 +13,7 @@
 
 import { useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { ordersApi } from '../services/api';
 import {
   ArrowLeft, Truck, CheckCircle2, Save, Send,
   Paperclip, FileText, File, ImageIcon, X,
@@ -65,10 +66,14 @@ export default function OrderDetailCRM({
   users = [],
   updateOrder,
 }) {
-  const [status, setStatus]   = useState(order.status);
-  const [carrier, setCarrier] = useState(order.carrier || '');
-  const [saved, setSaved]     = useState(false);
+  const [status, setStatus]       = useState(order.status);
+  const [carrier, setCarrier]     = useState(order.carrier || '');
+  const [saved, setSaved]         = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [localComments, setLocalComments]       = useState(order.comments    || []);
+  const [localAttachments, setLocalAttachments] = useState(order.attachments || []);
+  const [commentSaving, setCommentSaving]   = useState(false);
+  const [attachUploading, setAttachUploading] = useState(false);
   const fileInputRef = useRef(null);
 
   const { products } = useApp();
@@ -80,52 +85,49 @@ export default function OrderDetailCRM({
     return products.find(p => p.id === productId)?.sku || '—';
   }
 
-  const style    = STATUS_STYLES[status] || {};
-  const comments    = order.comments    || [];
-  const attachments = order.attachments || [];
+  const style       = STATUS_STYLES[status] || [];
+  const comments    = localComments;
+  const attachments = localAttachments;
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
-  function handleSave() {
+  async function handleSave() {
     const updates = { status };
     if (status === 'En Ruta') updates.carrier = carrier;
-    updateOrder(order.id, updates);
+    await updateOrder(order.id, updates);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   }
 
-  function handleAddComment() {
+  async function handleAddComment() {
     const text = commentText.trim();
-    if (!text) return;
-    const newComment = {
-      id: `c${Date.now()}`,
-      authorId:   currentUser.id,
-      authorName: currentUser.name,
-      authorRole: currentUser.role,
-      text,
-      createdAt: new Date().toISOString(),
-    };
-    updateOrder(order.id, { comments: [...comments, newComment] });
-    setCommentText('');
+    if (!text || commentSaving) return;
+    setCommentSaving(true);
+    try {
+      const saved = await ordersApi.addComment(order.id, text);
+      setLocalComments(prev => [...prev, saved]);
+      setCommentText('');
+    } finally {
+      setCommentSaving(false);
+    }
   }
 
-  function handleFileSelect(e) {
+  async function handleFileSelect(e) {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const newAttachment = {
-      id:          `att${Date.now()}`,
-      name:        file.name,
-      size:        file.size,
-      type:        file.type,
-      uploadedBy:  currentUser.name,
-      uploadedAt:  new Date().toISOString(),
-    };
-    updateOrder(order.id, { attachments: [...attachments, newAttachment] });
-    e.target.value = '';
+    if (!file || attachUploading) return;
+    setAttachUploading(true);
+    try {
+      const saved = await ordersApi.uploadAttachment(order.id, file);
+      setLocalAttachments(prev => [...prev, saved]);
+    } finally {
+      setAttachUploading(false);
+      e.target.value = '';
+    }
   }
 
-  function handleRemoveAttachment(attId) {
-    updateOrder(order.id, { attachments: attachments.filter(a => a.id !== attId) });
+  async function handleRemoveAttachment(attId) {
+    await ordersApi.removeAttachment(order.id, attId);
+    setLocalAttachments(prev => prev.filter(a => a.id !== attId));
   }
 
   // ── Render ────────────────────────────────────────────────────────────────

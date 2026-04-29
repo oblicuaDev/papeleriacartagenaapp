@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { tokenBlacklist } from '../lib/tokenBlacklist.js';
 
 // Verifica el token JWT y adjunta el payload al request
 export function requireAuth(req, res, next) {
@@ -7,6 +8,9 @@ export function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Token requerido' });
   }
   const token = header.slice(7);
+  if (tokenBlacklist.has(token)) {
+    return res.status(401).json({ error: 'Token inválido o expirado' });
+  }
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
     next();

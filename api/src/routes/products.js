@@ -35,16 +35,19 @@ router.get('/', async (req, res) => {
   const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
   const offset   = (pageNum - 1) * limitNum;
 
-  const params = [];
+  // condParams indexa desde $1 y se reutiliza igual en la count query.
+  // multiplier, limit y offset se appenden al final para no desplazar los índices WHERE.
+  const condParams = [];
   const conditions = ['p.active = true'];
 
-  if (active !== undefined)  conditions[0] = `p.active = $${params.push(active === 'true')}`;
-  if (categoryId) conditions.push(`p.category_id = $${params.push(parseInt(categoryId))}`);
+  if (active !== undefined)  conditions[0] = `p.active = $${condParams.push(active === 'true')}`;
+  if (categoryId) conditions.push(`p.category_id = $${condParams.push(parseInt(categoryId))}`);
   if (search) {
+    const s = '%' + search + '%';
     conditions.push(
-      `(p.name ILIKE $${params.push('%' + search + '%')}
-        OR p.sku  ILIKE $${params.push('%' + search + '%')}
-        OR p.description ILIKE $${params.push('%' + search + '%')})`
+      `(p.name        ILIKE $${condParams.push(s)}
+        OR p.sku       ILIKE $${condParams.push(s)}
+        OR p.description ILIKE $${condParams.push(s)})`
     );
   }
 
@@ -53,9 +56,15 @@ router.get('/', async (req, res) => {
   try {
     const multiplier = await resolveMultiplier(req);
 
+    // Params order: [...condParams, limitNum, offset, multiplier]
+    const mainParams  = [...condParams, limitNum, offset, multiplier];
+    const limitIdx    = condParams.length + 1;
+    const offsetIdx   = condParams.length + 2;
+    const multIdx     = condParams.length + 3;
+
     const { rows } = await pool.query(
       `SELECT p.*, c.name AS category_name,
-         ROUND(p.base_price * $1) AS price,
+         ROUND(p.base_price * $${multIdx}) AS price,
          COALESCE(
            ARRAY(
              SELECT complementary_id FROM product_complementaries
@@ -66,12 +75,13 @@ router.get('/', async (req, res) => {
        JOIN categories c ON c.id = p.category_id
        ${where}
        ORDER BY p.name
-       LIMIT $${params.push(limitNum)} OFFSET $${params.push(offset)}`,
-      [multiplier, ...params]
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+      mainParams
     );
 
+    // Count usa solo condParams (mismos índices $1...$N)
     const { rows: countRows } = await pool.query(
-      `SELECT COUNT(*) FROM products p ${where}`, params.slice(0, params.length - 2)
+      `SELECT COUNT(*) FROM products p ${where}`, condParams
     );
 
     return res.json({

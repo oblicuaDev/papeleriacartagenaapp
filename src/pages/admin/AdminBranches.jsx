@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Pencil, Eye, EyeOff, X, Building2, MapPin, Phone, Globe } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { branchesApi } from '../../services/api';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -21,11 +22,10 @@ function Modal({ title, onClose, children }) {
 const EMPTY_FORM = { name: '', city: '', address: '', phone: '', active: true };
 
 export default function AdminBranches() {
-  const { branches, setBranches } = useApp();
+  const { branches, refreshBranches } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editBranch, setEditBranch] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [nextId, setNextId] = useState(3);
 
   function openCreate() {
     setEditBranch(null);
@@ -39,19 +39,22 @@ export default function AdminBranches() {
     setShowModal(true);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name || !form.city) return;
     if (editBranch) {
-      setBranches(prev => prev.map(b => b.id === editBranch.id ? { ...b, ...form } : b));
+      await branchesApi.update(editBranch.id, form);
     } else {
-      setBranches(prev => [...prev, { id: nextId, ...form }]);
-      setNextId(n => n + 1);
+      await branchesApi.create(form);
     }
+    await refreshBranches();
     setShowModal(false);
   }
 
-  function toggleActive(id) {
-    setBranches(prev => prev.map(b => b.id === id ? { ...b, active: !b.active } : b));
+  async function toggleActive(id) {
+    const branch = branches.find(b => b.id === id);
+    if (!branch) return;
+    await branchesApi.update(id, { active: !branch.active });
+    await refreshBranches();
   }
 
   const inputClass = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';

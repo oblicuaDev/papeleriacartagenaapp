@@ -1,49 +1,60 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { resolvePriceListId, priceSqlFragment } from '../lib/pricing.js';
 
 const router = Router();
 router.use(requireAuth, requireRole('client'));
 
 // GET /catalog
 router.get('/', async (req, res) => {
-  const { id: userId } = req.user;
+  const { id: userId, companyId } = req.user;
   const { categoryId, search, page = 1, limit = 20 } = req.query;
   const pageNum  = Math.max(1, parseInt(page));
   const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
   const offset   = (pageNum - 1) * limitNum;
 
   try {
-    // Obtener datos de lista de precios del usuario
-    const { rows: userRows } = await pool.query(
-      `SELECT u.price_list_id, pl.name AS price_list_name, pl.multiplier
-       FROM users u
-       JOIN price_lists pl ON pl.id = u.price_list_id
-       WHERE u.id = $1`,
-      [userId]
+    // Lista aplicable: company.price_list_id > user.price_list_id
+    const priceListId = await resolvePriceListId({ companyId, userId });
+    if (!priceListId) {
+      return res.status(422).json({
+        error: 'No hay lista de precios asignada (ni a la empresa ni al usuario)',
+      });
+    }
+
+    const { rows: plRows } = await pool.query(
+      `SELECT name FROM price_lists WHERE id = $1`,
+      [priceListId]
     );
-    if (!userRows[0]) return res.status(422).json({ error: 'El usuario no tiene lista de precios asignada' });
+    const priceListName = plRows[0]?.name ?? null;
 
-    const { price_list_id, price_list_name, multiplier } = userRows[0];
-
-    const params = [multiplier];
+    // params: [priceListId, ...condParams, limit, offset]
+    const params = [priceListId];
     const conditions = ['p.active = true'];
 
     if (categoryId) conditions.push(`p.category_id = $${params.push(parseInt(categoryId))}`);
     if (search) {
+      const s = '%' + search + '%';
       conditions.push(
-        `(p.name ILIKE $${params.push('%' + search + '%')} OR p.sku ILIKE $${params.push('%' + search + '%')})`
+        `(p.name ILIKE $${params.push(s)} OR p.sku ILIKE $${params.push(s)})`
       );
     }
 
     const where = 'WHERE ' + conditions.join(' AND ');
+    const condParamCount = params.length; // antes de limit/offset
+
+    const { select: priceSelect, join: priceJoin } = priceSqlFragment({
+      alias: 'p',
+      listIdParam: '$1',
+    });
 
     const { rows } = await pool.query(
       `SELECT
          p.id, p.name, p.sku, p.category_id,
          c.name AS category_name,
          p.description,
-         ROUND(p.base_price * $1)::int AS price,
+         ${priceSelect} AS price,
          p.stock, p.unit, p.image_url,
          COALESCE(
            ARRAY(SELECT complementary_id FROM product_complementaries WHERE product_id = p.id),
@@ -51,24 +62,28 @@ router.get('/', async (req, res) => {
          ) AS complementary_ids
        FROM products p
        JOIN categories c ON c.id = p.category_id
+       ${priceJoin}
        ${where}
        ORDER BY p.name
        LIMIT $${params.push(limitNum)} OFFSET $${params.push(offset)}`,
       params
     );
 
+    // Count: la condicion no usa $1 (priceListId), pero los placeholders
+    // siguen alineados porque condParams ocupan $2..$N.
+    // Reusamos params[0..condParamCount] para el count.
     const { rows: countRows } = await pool.query(
       `SELECT COUNT(*) FROM products p ${where}`,
-      params.slice(0, params.length - 2)
+      params.slice(0, condParamCount)
     );
 
     return res.json({
-      priceListId:   price_list_id,
-      priceListName: price_list_name,
-      data:          rows,
-      total:         parseInt(countRows[0].count),
-      page:          pageNum,
-      limit:         limitNum,
+      priceListId,
+      priceListName,
+      data:  rows,
+      total: parseInt(countRows[0].count),
+      page:  pageNum,
+      limit: limitNum,
     });
   } catch (err) {
     console.error(err);

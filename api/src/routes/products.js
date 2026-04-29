@@ -1,31 +1,19 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { resolvePriceListId, priceSqlFragment } from '../lib/pricing.js';
 
 const router = Router();
 router.use(requireAuth);
 
-// Calcula el precio con el multiplier del usuario autenticado
-async function resolveMultiplier(req) {
-  const { role, companyId } = req.user;
-  const priceListId = req.query.priceListId;
-
-  // Admin/advisor pueden pedir una lista específica
-  if ((role === 'admin' || role === 'advisor') && priceListId) {
-    const { rows } = await pool.query(`SELECT multiplier FROM price_lists WHERE id = $1`, [priceListId]);
-    return rows[0]?.multiplier ?? 1;
-  }
-  // Cliente usa su lista de precios asignada
-  if (role === 'client') {
-    const { rows } = await pool.query(
-      `SELECT pl.multiplier FROM users u
-       JOIN price_lists pl ON pl.id = u.price_list_id
-       WHERE u.id = $1`,
-      [req.user.id]
-    );
-    return rows[0]?.multiplier ?? 1;
-  }
-  return 1;
+// Resuelve la lista aplicable al request:
+//   admin/advisor con ?priceListId  -> override explicito
+//   client                          -> company.price_list_id > user.price_list_id
+async function resolveListForRequest(req) {
+  const { role, id: userId, companyId } = req.user;
+  const override =
+    (role === 'admin' || role === 'advisor') ? req.query.priceListId : undefined;
+  return resolvePriceListId({ companyId, userId, override });
 }
 
 // GET /products
@@ -54,17 +42,23 @@ router.get('/', async (req, res) => {
   const where = 'WHERE ' + conditions.join(' AND ');
 
   try {
-    const multiplier = await resolveMultiplier(req);
+    const priceListId = await resolveListForRequest(req);
 
-    // Params order: [...condParams, limitNum, offset, multiplier]
-    const mainParams  = [...condParams, limitNum, offset, multiplier];
-    const limitIdx    = condParams.length + 1;
-    const offsetIdx   = condParams.length + 2;
-    const multIdx     = condParams.length + 3;
+    // Params order: [...condParams, priceListId, limitNum, offset]
+    const listIdx   = condParams.length + 1;
+    const limitIdx  = condParams.length + 2;
+    const offsetIdx = condParams.length + 3;
+    const mainParams = [...condParams, priceListId, limitNum, offset];
+
+    const { select: priceSelect, join: priceJoin } = priceSqlFragment({
+      alias: 'p',
+      listIdParam: `$${listIdx}`,
+    });
 
     const { rows } = await pool.query(
       `SELECT p.*, c.name AS category_name,
-         ROUND(p.base_price * $${multIdx}) AS price,
+         ${priceSelect} AS price,
+         $${listIdx}::int AS price_list_id,
          COALESCE(
            ARRAY(
              SELECT complementary_id FROM product_complementaries
@@ -73,6 +67,7 @@ router.get('/', async (req, res) => {
          ) AS complementary_ids
        FROM products p
        JOIN categories c ON c.id = p.category_id
+       ${priceJoin}
        ${where}
        ORDER BY p.name
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
@@ -85,10 +80,11 @@ router.get('/', async (req, res) => {
     );
 
     return res.json({
-      data:  rows,
-      total: parseInt(countRows[0].count),
-      page:  pageNum,
-      limit: limitNum,
+      data:        rows,
+      total:       parseInt(countRows[0].count),
+      page:        pageNum,
+      limit:       limitNum,
+      priceListId,
     });
   } catch (err) {
     console.error(err);
@@ -100,25 +96,34 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   try {
-    const multiplier = await resolveMultiplier(req);
+    const priceListId = await resolveListForRequest(req);
+    const { select: priceSelect, join: priceJoin } = priceSqlFragment({
+      alias: 'p',
+      listIdParam: '$1',
+    });
 
     const { rows } = await pool.query(
       `SELECT p.*, c.name AS category_name,
-         ROUND(p.base_price * $1) AS price
+         ${priceSelect} AS price,
+         $1::int AS price_list_id
        FROM products p
        JOIN categories c ON c.id = p.category_id
+       ${priceJoin}
        WHERE p.id = $2`,
-      [multiplier, id]
+      [priceListId, id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Producto no encontrado' });
 
-    // Complementarios expandidos
+    // Complementarios expandidos (query independiente, alias pl/pli en su propio scope)
+    const compFrag = priceSqlFragment({ alias: 'p2', listIdParam: '$1' });
     const { rows: comps } = await pool.query(
-      `SELECT p2.id, p2.name, p2.sku, ROUND(p2.base_price * $1) AS price
+      `SELECT p2.id, p2.name, p2.sku,
+              ${compFrag.select} AS price
        FROM product_complementaries pc
        JOIN products p2 ON p2.id = pc.complementary_id
+       ${compFrag.join}
        WHERE pc.product_id = $2 AND p2.active = true`,
-      [multiplier, id]
+      [priceListId, id]
     );
 
     return res.json({ ...rows[0], complementaries: comps });

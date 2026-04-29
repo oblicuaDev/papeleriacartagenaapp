@@ -1,9 +1,41 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { buildCsv, buildXlsx } from '../lib/orderExport.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Construye el filtro WHERE de pedidos segun el rol del request.
+// Devuelve { conditions, params } para componer en queries posteriores.
+// Lanza un Error con .status para errores de autorizacion.
+function buildScopeFilter(req) {
+  const { role, id, companyId, clientRole } = req.user;
+  const { dateFrom, dateTo, status, companyId: qCompanyId } = req.query;
+
+  const params = [];
+  const conds = [];
+
+  if (role === 'admin') {
+    if (qCompanyId) conds.push(`uc.company_id = $${params.push(parseInt(qCompanyId))}`);
+  } else if (role === 'advisor') {
+    conds.push(`o.advisor_id = $${params.push(id)}`);
+  } else if (role === 'client' && clientRole === 'creador_pedidos') {
+    conds.push(`o.client_id = $${params.push(id)}`);
+  } else if (role === 'client' && clientRole === 'supervisor') {
+    conds.push(`uc.company_id = $${params.push(companyId)}`);
+  } else {
+    const e = new Error('No autorizado');
+    e.status = 403;
+    throw e;
+  }
+
+  if (status)   conds.push(`o.status = $${params.push(status)}`);
+  if (dateFrom) conds.push(`o.created_at >= $${params.push(dateFrom)}`);
+  if (dateTo)   conds.push(`o.created_at <= $${params.push(dateTo + ' 23:59:59')}`);
+
+  return { conditions: conds, params };
+}
 
 // GET /stats/admin
 router.get('/admin', requireRole('admin'), async (_req, res) => {
@@ -101,6 +133,169 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
       pendingForMe,
       ordersByStatus,
     });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /stats/client (PHASE 8)
+//   - supervisor: stats agregadas de toda la empresa
+//   - creador_pedidos: stats de sus propios pedidos
+router.get('/client', requireRole('client'), async (req, res) => {
+  const { id: myId, companyId, clientRole } = req.user;
+
+  const isSupervisor = clientRole === 'supervisor';
+  const params = [isSupervisor ? companyId : myId];
+  const where = isSupervisor
+    ? `uc.company_id = $1`
+    : `o.client_id = $1`;
+  const fromJoin = `FROM orders o JOIN users uc ON uc.id = o.client_id`;
+
+  try {
+    const [
+      { rows: totalRows },
+      { rows: monthRows },
+      { rows: statusRows },
+      { rows: monthlyRows },
+      { rows: topProdRows },
+      { rows: topUserRows },
+    ] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS revenue
+         ${fromJoin} WHERE ${where}`,
+        params
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS revenue
+         ${fromJoin}
+         WHERE ${where}
+           AND DATE_TRUNC('month', o.created_at) = DATE_TRUNC('month', NOW())`,
+        params
+      ),
+      pool.query(
+        `SELECT o.status, COUNT(*) AS count
+         ${fromJoin} WHERE ${where}
+         GROUP BY o.status`,
+        params
+      ),
+      pool.query(
+        `SELECT TO_CHAR(DATE_TRUNC('month', o.created_at), 'YYYY-MM') AS month,
+                COUNT(*)::int AS orders,
+                COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS revenue
+         ${fromJoin} WHERE ${where}
+         GROUP BY 1
+         ORDER BY 1 DESC
+         LIMIT 12`,
+        params
+      ),
+      pool.query(
+        `SELECT oi.product_id, oi.product_name, oi.sku,
+                SUM(oi.quantity)::int AS quantity,
+                SUM(oi.quantity * oi.unit_price)::float AS revenue
+         ${fromJoin}
+         JOIN order_items oi ON oi.order_id = o.id
+         WHERE ${where}
+           AND o.status NOT IN ('Rechazado', 'Pendiente por aprobar')
+         GROUP BY oi.product_id, oi.product_name, oi.sku
+         ORDER BY quantity DESC
+         LIMIT 10`,
+        params
+      ),
+      // Solo relevante para supervisor: quien pide mas en su empresa
+      isSupervisor
+        ? pool.query(
+            `SELECT uc.id AS user_id, uc.name AS user_name,
+                    COUNT(*)::int AS orders,
+                    COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS revenue
+             ${fromJoin}
+             WHERE uc.company_id = $1
+             GROUP BY uc.id, uc.name
+             ORDER BY orders DESC
+             LIMIT 10`,
+            params
+          )
+        : Promise.resolve({ rows: [] }),
+    ]);
+
+    const ordersByStatus = {};
+    for (const row of statusRows) ordersByStatus[row.status] = parseInt(row.count);
+
+    return res.json({
+      scope: isSupervisor ? 'company' : 'self',
+      totalOrders:      parseInt(totalRows[0].total),
+      ordersThisMonth:  parseInt(monthRows[0].total),
+      totalSpent:       parseFloat(totalRows[0].revenue),
+      spentThisMonth:   parseFloat(monthRows[0].revenue),
+      ordersByStatus,
+      monthly:          monthlyRows.reverse(),
+      topProducts:      topProdRows,
+      topUsers:         topUserRows,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// GET /stats/orders/export?format=csv|xlsx (PHASE 8)
+// Aplica el mismo scope por rol que GET /orders.
+router.get('/orders/export', async (req, res) => {
+  const format = (req.query.format || 'csv').toLowerCase();
+  if (!['csv', 'xlsx'].includes(format)) {
+    return res.status(422).json({ error: 'format debe ser csv o xlsx' });
+  }
+
+  let scope;
+  try {
+    scope = buildScopeFilter(req);
+  } catch (e) {
+    return res.status(e.status || 500).json({ error: e.message });
+  }
+
+  const where = scope.conditions.length ? 'WHERE ' + scope.conditions.join(' AND ') : '';
+
+  try {
+    const { rows } = await pool.query(
+      `SELECT o.id,
+              o.status,
+              TO_CHAR(o.created_at, 'YYYY-MM-DD') AS created_at,
+              c.name  AS company,
+              s.name  AS sucursal,
+              uc.name AS client,
+              ua.name AS advisor,
+              o.total::float AS total,
+              (SELECT COUNT(*) FROM order_items WHERE order_id = o.id)::int AS items
+         FROM orders o
+         JOIN users uc           ON uc.id = o.client_id
+         LEFT JOIN companies c   ON c.id  = uc.company_id
+         LEFT JOIN sucursales s  ON s.id  = uc.sucursal_id
+         LEFT JOIN users ua      ON ua.id = o.advisor_id
+       ${where}
+       ORDER BY o.created_at DESC
+       LIMIT 10000`,
+      scope.params
+    );
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    const filename = `pedidos_${stamp}.${format}`;
+
+    if (format === 'csv') {
+      const csv = buildCsv(rows);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(csv);
+    } else {
+      const buf = await buildXlsx(rows);
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(buf);
+    }
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });

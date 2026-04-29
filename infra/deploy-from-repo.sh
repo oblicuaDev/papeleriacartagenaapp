@@ -120,11 +120,34 @@ else
 fi
 
 # ── 6. Reload PM2 ───────────────────────────────────────────
+# Detecta el usuario UNIX dueno del daemon PM2 que tiene registrado el proceso.
+# Necesario porque setup-vm.sh registro PM2 bajo root, pero alguien pudo
+# tambien arrancarlo bajo el usuario interactivo.
 if [ "$DO_API" = "1" ]; then
   echo "[6/6] pm2 reload $PM2_PROCESS..."
-  pm2 reload "$PM2_PROCESS" --update-env
+
+  PM2_OWNER=""
+  for u in root $(logname 2>/dev/null) $(stat -c '%U' "$APP_API" 2>/dev/null) www-data; do
+    [ -z "$u" ] && continue
+    if sudo -u "$u" pm2 jlist 2>/dev/null | grep -q "\"name\":\"$PM2_PROCESS\""; then
+      PM2_OWNER="$u"
+      break
+    fi
+  done
+
+  if [ -z "$PM2_OWNER" ]; then
+    echo "    ERROR: no se encontro $PM2_PROCESS en ningun daemon PM2."
+    echo "    Verifica con:  pm2 list   y   sudo pm2 list"
+    echo "    Para registrarlo manualmente (ajusta el path al entrypoint):"
+    echo "      sudo -u root pm2 start $APP_API/src/app.js --name $PM2_PROCESS"
+    echo "      sudo -u root pm2 save"
+    exit 1
+  fi
+
+  echo "    Daemon PM2 encontrado bajo usuario: $PM2_OWNER"
+  sudo -u "$PM2_OWNER" pm2 reload "$PM2_PROCESS" --update-env
   sleep 1
-  pm2 logs "$PM2_PROCESS" --lines 20 --nostream || true
+  sudo -u "$PM2_OWNER" pm2 logs "$PM2_PROCESS" --lines 20 --nostream || true
 else
   echo "[6/6] PM2 skip"
 fi

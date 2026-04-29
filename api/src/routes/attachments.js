@@ -43,9 +43,16 @@ const upload = multer({
   },
 });
 
+const ALLOWED_ATTACH_TYPES = ['general', 'evidence', 'invoice', 'receipt'];
+
 // POST /orders/:orderId/attachments
-router.post('/', requireRole('admin', 'advisor'), (req, res) => {
+// PHASE 6:
+//   - Acepta `type` en form-data (general | evidence | invoice | receipt).
+//   - delivery solo puede subir 'evidence'.
+//   - Devuelve `mimeType` y `type` (semantico) por separado.
+router.post('/', requireRole('admin', 'advisor', 'delivery'), (req, res) => {
   const orderId = req.params.orderId.toUpperCase();
+  const { role } = req.user;
 
   upload.single('file')(req, res, async (err) => {
     if (err instanceof multer.MulterError) {
@@ -55,6 +62,17 @@ router.post('/', requireRole('admin', 'advisor'), (req, res) => {
     if (err) return res.status(500).json({ error: 'Error al subir el archivo' });
     if (!req.file) return res.status(422).json({ error: 'file es requerido' });
 
+    // Validar `type` despues de multer (multer pobla req.body con campos no-file)
+    const attachType = (req.body.type || 'general').toLowerCase();
+    if (!ALLOWED_ATTACH_TYPES.includes(attachType)) {
+      return res.status(422).json({
+        error: `type invalido. Permitidos: ${ALLOWED_ATTACH_TYPES.join(', ')}`,
+      });
+    }
+    if (role === 'delivery' && attachType !== 'evidence') {
+      return res.status(403).json({ error: 'delivery solo puede subir adjuntos tipo evidence' });
+    }
+
     try {
       const { rows: orderRows } = await pool.query(`SELECT id FROM orders WHERE id = $1`, [orderId]);
       if (!orderRows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -63,9 +81,10 @@ router.post('/', requireRole('admin', 'advisor'), (req, res) => {
       const fileUrl = `${baseUrl}/${req.file.filename}`;
 
       const { rows } = await pool.query(
-        `INSERT INTO order_attachments (order_id, file_name, file_size, mime_type, file_url, uploaded_by)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [orderId, req.file.originalname, req.file.size, req.file.mimetype, fileUrl, req.user.id]
+        `INSERT INTO order_attachments
+           (order_id, file_name, file_size, mime_type, file_url, type, uploaded_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [orderId, req.file.originalname, req.file.size, req.file.mimetype, fileUrl, attachType, req.user.id]
       );
 
       const { rows: userRows } = await pool.query(`SELECT name FROM users WHERE id = $1`, [req.user.id]);
@@ -75,7 +94,8 @@ router.post('/', requireRole('admin', 'advisor'), (req, res) => {
         orderId:    rows[0].order_id,
         name:       rows[0].file_name,
         size:       rows[0].file_size,
-        type:       rows[0].mime_type,
+        mimeType:   rows[0].mime_type,
+        type:       rows[0].type,
         url:        rows[0].file_url,
         uploadedBy: userRows[0].name,
         uploadedAt: rows[0].uploaded_at,

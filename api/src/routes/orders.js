@@ -121,6 +121,102 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Helper: ACL compartida para GET /:id y GET /:id/timeline
+async function canViewOrder(req, order) {
+  const { role, id: myId, companyId } = req.user;
+  if (role === 'admin') return true;
+  if (role === 'advisor') return order.advisor_id === myId;
+  if (role === 'delivery') return DELIVERY_VISIBLE_STATUSES.includes(order.status);
+  if (role === 'client') {
+    const { rows } = await pool.query(
+      `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
+    );
+    return rows[0]?.company_id === companyId;
+  }
+  return false;
+}
+
+// GET /orders/:id/timeline (PHASE 6)
+// Feed cronologico unificado: status changes + comments + attachments
+router.get('/:id/timeline', async (req, res) => {
+  const orderId = req.params.id.toUpperCase();
+
+  try {
+    const { rows: orderRows } = await pool.query(
+      `SELECT id, client_id, advisor_id, status FROM orders WHERE id = $1`,
+      [orderId]
+    );
+    if (!orderRows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (!(await canViewOrder(req, orderRows[0]))) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    const { rows } = await pool.query(
+      `
+      SELECT * FROM (
+        SELECT
+          'status'::text       AS event_type,
+          osl.created_at       AS occurred_at,
+          osl.changed_by       AS actor_id,
+          u.name               AS actor_name,
+          u.role               AS actor_role,
+          jsonb_build_object(
+            'fromStatus', osl.from_status,
+            'toStatus',   osl.to_status,
+            'reason',     osl.reason
+          ) AS payload
+        FROM order_status_log osl
+        LEFT JOIN users u ON u.id = osl.changed_by
+        WHERE osl.order_id = $1
+
+        UNION ALL
+
+        SELECT
+          'comment'::text      AS event_type,
+          oc.created_at        AS occurred_at,
+          oc.author_id         AS actor_id,
+          u.name               AS actor_name,
+          u.role               AS actor_role,
+          jsonb_build_object(
+            'commentId', oc.id,
+            'text',      oc.text
+          ) AS payload
+        FROM order_comments oc
+        JOIN users u ON u.id = oc.author_id
+        WHERE oc.order_id = $1
+
+        UNION ALL
+
+        SELECT
+          'attachment'::text   AS event_type,
+          oa.uploaded_at       AS occurred_at,
+          oa.uploaded_by       AS actor_id,
+          u.name               AS actor_name,
+          u.role               AS actor_role,
+          jsonb_build_object(
+            'attachmentId', oa.id,
+            'fileName',     oa.file_name,
+            'mimeType',     oa.mime_type,
+            'fileSize',     oa.file_size,
+            'fileUrl',      oa.file_url,
+            'type',         oa.type
+          ) AS payload
+        FROM order_attachments oa
+        JOIN users u ON u.id = oa.uploaded_by
+        WHERE oa.order_id = $1
+      ) t
+      ORDER BY occurred_at ASC, event_type ASC
+      `,
+      [orderId]
+    );
+
+    return res.json({ orderId, events: rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 // GET /orders/:id
 router.get('/:id', async (req, res) => {
   const { role, id: myId, companyId } = req.user;
@@ -195,11 +291,24 @@ router.get('/:id', async (req, res) => {
 //   - Cliente NUNCA dicta el precio almacenado
 router.post('/', requireRole('client'), async (req, res) => {
   const { id: clientId, clientRole, companyId } = req.user;
-  const { notes, items } = req.body;
+  const { items } = req.body;
+  let { notes } = req.body;
 
   // ── Validacion de payload ────────────────────────────────
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(422).json({ error: 'El pedido debe tener al menos un producto' });
+  }
+
+  // PHASE 6: validar notes (max 1000 chars, trim, null si vacio)
+  if (notes !== undefined && notes !== null) {
+    if (typeof notes !== 'string') {
+      return res.status(422).json({ error: 'notes debe ser texto' });
+    }
+    notes = notes.trim();
+    if (notes.length > 1000) {
+      return res.status(422).json({ error: 'notes no puede superar 1000 caracteres' });
+    }
+    if (notes.length === 0) notes = null;
   }
 
   for (const [idx, item] of items.entries()) {

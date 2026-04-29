@@ -226,9 +226,14 @@ CREATE TABLE IF NOT EXISTS order_attachments (
     file_size   BIGINT,
     mime_type   VARCHAR(100),
     file_url    TEXT         NOT NULL,
+    type        VARCHAR(30)  NOT NULL DEFAULT 'general',
     uploaded_by INTEGER      NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    uploaded_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    uploaded_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_attachment_type CHECK (type IN ('general', 'evidence', 'invoice', 'receipt'))
 );
+
+-- Asegurar columna en instalaciones previas
+ALTER TABLE order_attachments ADD COLUMN IF NOT EXISTS type VARCHAR(30) NOT NULL DEFAULT 'general';
 
 -- ----------------------------------------------------------
 -- 13. price_list_items — Precio explicito por (producto, lista)
@@ -303,6 +308,7 @@ CREATE INDEX IF NOT EXISTS idx_pli_product              ON price_list_items(prod
 CREATE INDEX IF NOT EXISTS idx_pli_price_list           ON price_list_items(price_list_id);
 CREATE INDEX IF NOT EXISTS idx_osl_order                ON order_status_log(order_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_osl_changed_by           ON order_status_log(changed_by);
+CREATE INDEX IF NOT EXISTS idx_attachments_type         ON order_attachments(type);
 CREATE INDEX IF NOT EXISTS idx_sucursales_company       ON sucursales(company_id);
 CREATE INDEX IF NOT EXISTS idx_users_company            ON users(company_id);
 CREATE INDEX IF NOT EXISTS idx_users_sucursal           ON users(sucursal_id);

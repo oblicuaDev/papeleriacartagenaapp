@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS users (
     active        BOOLEAN      NOT NULL DEFAULT true,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_role
-        CHECK (role IN ('admin', 'advisor', 'client')),
+        CHECK (role IN ('admin', 'advisor', 'client', 'delivery')),
     CONSTRAINT chk_client_role
         CHECK (
             (role = 'client' AND client_role IN ('supervisor', 'creador_pedidos'))
@@ -95,10 +95,15 @@ CREATE TABLE IF NOT EXISTS users (
             (role = 'client' AND company_id IS NOT NULL AND sucursal_id IS NOT NULL AND price_list_id IS NOT NULL)
             OR role <> 'client'
         ),
-    CONSTRAINT chk_advisor_fields
+    CONSTRAINT chk_branch_required
         CHECK (
-            (role = 'advisor' AND branch_id IS NOT NULL)
-            OR role <> 'advisor'
+            (role IN ('advisor', 'delivery') AND branch_id IS NOT NULL)
+            OR role NOT IN ('advisor', 'delivery')
+        ),
+    CONSTRAINT chk_non_client_fields
+        CHECK (
+            role = 'client'
+            OR (company_id IS NULL AND sucursal_id IS NULL AND price_list_id IS NULL AND client_role IS NULL)
         )
 );
 

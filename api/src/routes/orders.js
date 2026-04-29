@@ -26,7 +26,15 @@ const VALID_TRANSITIONS = {
   supervisor: {
     'Pendiente por aprobar': ['Pendiente', 'Rechazado'],
   },
+  // PHASE 5: rol delivery (couriers)
+  delivery: {
+    'Alistamiento': ['En Ruta'],
+    'En Ruta':      ['Entregado'],
+  },
 };
+
+// Estados visibles para delivery (operativo)
+const DELIVERY_VISIBLE_STATUSES = ['Alistamiento', 'En Ruta', 'Entregado'];
 
 // GET /orders
 router.get('/', async (req, res) => {
@@ -51,6 +59,11 @@ router.get('/', async (req, res) => {
     // Ve todos los pedidos de su empresa
     conditions.push(
       `o.client_id IN (SELECT id FROM users WHERE company_id = $${params.push(companyId)})`
+    );
+  } else if (role === 'delivery') {
+    // PHASE 5: delivery solo ve pedidos en estados operativos
+    conditions.push(
+      `o.status = ANY($${params.push(DELIVERY_VISIBLE_STATUSES)}::varchar[])`
     );
   }
 
@@ -139,6 +152,9 @@ router.get('/:id', async (req, res) => {
       if (userRows[0]?.company_id !== companyId) {
         return res.status(403).json({ error: 'No autorizado' });
       }
+    }
+    if (role === 'delivery' && !DELIVERY_VISIBLE_STATUSES.includes(order.status)) {
+      return res.status(403).json({ error: 'No autorizado' });
     }
 
     // Items
@@ -386,6 +402,9 @@ router.put('/:id', async (req, res) => {
           return res.status(403).json({ error: 'No autorizado para aprobar pedidos de otra empresa' });
         }
         allowedTransitions = VALID_TRANSITIONS.supervisor[order.status] || [];
+      } else if (role === 'delivery') {
+        // PHASE 5: delivery solo opera transiciones de transporte
+        allowedTransitions = VALID_TRANSITIONS.delivery[order.status] || [];
       } else {
         await client.query('ROLLBACK');
         return res.status(403).json({ error: 'No autorizado para cambiar este estado' });

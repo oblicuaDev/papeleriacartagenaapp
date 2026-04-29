@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { resolvePriceListId, priceSqlFragment } from '../lib/pricing.js';
+import { ensurePurchaseOrderPdf } from '../lib/purchaseOrderPdf.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -561,7 +562,21 @@ router.put('/:id', async (req, res) => {
     }
 
     await client.query('COMMIT');
-    return res.json(updated[0]);
+
+    // PHASE 7: generar orden de compra (PDF) cuando se aprueba el pedido.
+    // Se ejecuta DESPUES del commit para no bloquear la transaccion ni perder
+    // el cambio de estado si la generacion del PDF falla.
+    let warnings;
+    if (statusChanges && status === 'Pendiente' && order.status === 'Pendiente por aprobar') {
+      try {
+        await ensurePurchaseOrderPdf(orderId, myId);
+      } catch (pdfErr) {
+        console.error(`[orders] No se pudo generar PDF de ${orderId}:`, pdfErr);
+        warnings = ['No se pudo generar el documento de orden de compra'];
+      }
+    }
+
+    return res.json(warnings ? { ...updated[0], warnings } : updated[0]);
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);

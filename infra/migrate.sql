@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS order_attachments (
     type        VARCHAR(30)  NOT NULL DEFAULT 'general',
     uploaded_by INTEGER      NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     uploaded_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-    CONSTRAINT chk_attachment_type CHECK (type IN ('general', 'evidence', 'invoice', 'receipt'))
+    CONSTRAINT chk_attachment_type CHECK (type IN ('general', 'evidence', 'invoice', 'receipt', 'purchase_order'))
 );
 
 -- Asegurar columna en instalaciones previas

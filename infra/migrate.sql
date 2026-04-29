@@ -12,6 +12,7 @@ BEGIN;
 
 -- ----------------------------------------------------------
 -- 1. companies — Empresas cliente
+-- (price_list_id se agrega abajo, despues de crear price_lists)
 -- ----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS companies (
     id         SERIAL PRIMARY KEY,
@@ -225,8 +226,51 @@ CREATE TABLE IF NOT EXISTS order_attachments (
 );
 
 -- ----------------------------------------------------------
+-- 13. price_list_items — Precio explicito por (producto, lista)
+--     Override: si existe fila para (product_id, price_list_id) usa
+--     este precio; si no, usa products.base_price (resuelto en backend).
+-- ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS price_list_items (
+    id            SERIAL         PRIMARY KEY,
+    product_id    INTEGER        NOT NULL REFERENCES products(id)    ON DELETE CASCADE,
+    price_list_id INTEGER        NOT NULL REFERENCES price_lists(id) ON DELETE CASCADE,
+    price         NUMERIC(12, 2) NOT NULL,
+    currency      CHAR(3)        NOT NULL DEFAULT 'COP',
+    created_at    TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_price_list_items_product_list UNIQUE (product_id, price_list_id),
+    CONSTRAINT chk_pli_price    CHECK (price > 0),
+    CONSTRAINT chk_pli_currency CHECK (currency ~ '^[A-Z]{3}$')
+);
+
+CREATE OR REPLACE FUNCTION fn_update_pli_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_pli_updated_at ON price_list_items;
+CREATE TRIGGER trg_pli_updated_at
+    BEFORE UPDATE ON price_list_items
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_update_pli_updated_at();
+
+-- ----------------------------------------------------------
+-- companies.price_list_id — vinculo empresa -> lista de precios
+-- (se agrega aqui porque price_lists ya existe)
+-- ----------------------------------------------------------
+ALTER TABLE companies
+    ADD COLUMN IF NOT EXISTS price_list_id INTEGER
+        REFERENCES price_lists(id) ON DELETE RESTRICT;
+
+-- ----------------------------------------------------------
 -- Índices de rendimiento
 -- ----------------------------------------------------------
+CREATE INDEX IF NOT EXISTS idx_companies_price_list     ON companies(price_list_id);
+CREATE INDEX IF NOT EXISTS idx_pli_product              ON price_list_items(product_id);
+CREATE INDEX IF NOT EXISTS idx_pli_price_list           ON price_list_items(price_list_id);
 CREATE INDEX IF NOT EXISTS idx_sucursales_company       ON sucursales(company_id);
 CREATE INDEX IF NOT EXISTS idx_users_company            ON users(company_id);
 CREATE INDEX IF NOT EXISTS idx_users_sucursal           ON users(sucursal_id);

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { resolvePriceListId, priceSqlFragment } from '../lib/pricing.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -171,55 +172,123 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /orders
+// PHASE 3:
+//   - Valida estructura de items
+//   - Resuelve precio BACKEND (lib pricing) y lo persiste como frozen en order_items.unit_price
+//   - Si el cliente envia item.unitPrice, valida que coincida con el backend (anti-tamper / cache stale)
+//   - Cliente NUNCA dicta el precio almacenado
 router.post('/', requireRole('client'), async (req, res) => {
   const { id: clientId, clientRole, companyId } = req.user;
   const { notes, items } = req.body;
 
-  if (!items || items.length === 0) {
+  // ── Validacion de payload ────────────────────────────────
+  if (!Array.isArray(items) || items.length === 0) {
     return res.status(422).json({ error: 'El pedido debe tener al menos un producto' });
   }
 
-  // Status inicial según clientRole
+  for (const [idx, item] of items.entries()) {
+    if (!Number.isInteger(item?.productId) || item.productId <= 0) {
+      return res.status(422).json({ error: `items[${idx}].productId invalido` });
+    }
+    if (!Number.isInteger(item?.quantity) || item.quantity <= 0) {
+      return res.status(422).json({ error: `items[${idx}].quantity debe ser entero positivo` });
+    }
+    if (item.unitPrice !== undefined &&
+        (typeof item.unitPrice !== 'number' || !Number.isFinite(item.unitPrice) || item.unitPrice < 0)) {
+      return res.status(422).json({ error: `items[${idx}].unitPrice invalido` });
+    }
+  }
+
+  // Detectar productIds duplicados (el frontend deberia agruparlos)
+  const seen = new Set();
+  for (const it of items) {
+    if (seen.has(it.productId)) {
+      return res.status(422).json({ error: `productId duplicado: ${it.productId}` });
+    }
+    seen.add(it.productId);
+  }
+
+  // Status inicial segun clientRole
   const initialStatus = clientRole === 'supervisor' ? 'Pendiente' : 'Pendiente por aprobar';
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Generar ID
-    const orderId = await client.query(`SELECT fn_generate_order_id() AS id`);
-    const newId = orderId.rows[0].id;
+    // Resolver lista aplicable al cliente (company > user)
+    const orderPriceListId = await resolvePriceListId(
+      { companyId, userId: clientId },
+      client
+    );
 
-    // Calcular total y armar snapshot de items
+    const { select: priceSelect, join: priceJoin } = priceSqlFragment({
+      alias: 'p',
+      listIdParam: '$2',
+    });
+
+    // Calcular total y armar snapshot frozen con precio BACKEND
     let total = 0;
     const itemsToInsert = [];
+    const priceMismatches = [];
 
-    for (const item of items) {
+    for (const [idx, item] of items.entries()) {
       const { rows: productRows } = await client.query(
-        `SELECT p.*, ROUND(p.base_price * pl.multiplier) AS effective_price
+        `SELECT p.id, p.name, p.sku, p.unit, p.active,
+                ${priceSelect} AS backend_price
          FROM products p
-         JOIN users u ON u.id = $2
-         JOIN price_lists pl ON pl.id = u.price_list_id
-         WHERE p.id = $1 AND p.active = true`,
-        [item.productId, clientId]
+         ${priceJoin}
+         WHERE p.id = $1`,
+        [item.productId, orderPriceListId]
       );
-      if (!productRows[0]) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: `Producto no encontrado: id=${item.productId}` });
-      }
       const product = productRows[0];
-      const unitPrice = item.unitPrice ?? Number(product.effective_price);
-      total += unitPrice * item.quantity;
+      if (!product) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: `items[${idx}]: producto no encontrado (id=${item.productId})` });
+      }
+      if (!product.active) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: `items[${idx}]: producto inactivo (id=${item.productId})` });
+      }
+
+      const backendPrice = Number(product.backend_price);
+      if (!Number.isFinite(backendPrice) || backendPrice <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(500).json({ error: `items[${idx}]: precio backend no resoluble (producto ${item.productId})` });
+      }
+
+      // Validar precio del cliente vs backend (deteccion de cache stale o tampering)
+      if (item.unitPrice !== undefined && Math.round(item.unitPrice) !== backendPrice) {
+        priceMismatches.push({
+          productId:    product.id,
+          productName:  product.name,
+          clientPrice:  Math.round(item.unitPrice),
+          backendPrice,
+        });
+      }
 
       itemsToInsert.push({
         productId:   product.id,
         productName: product.name,
         sku:         product.sku,
         quantity:    item.quantity,
-        unitPrice,
+        unitPrice:   backendPrice,        // ← FROZEN: backend es la unica fuente de verdad
         unit:        product.unit,
       });
+      total += backendPrice * item.quantity;
     }
+
+    // Mismatch de precios: abortar y forzar reconfirmacion en cliente
+    if (priceMismatches.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'El precio cambio. Recarga el catalogo y reconfirma el pedido.',
+        mismatches: priceMismatches,
+      });
+    }
+
+    // Generar ID despues de validar (no quemamos numeros si falla)
+    const { rows: idRows } = await client.query(`SELECT fn_generate_order_id() AS id`);
+    const newId = idRows[0].id;
 
     // Crear pedido
     await client.query(
@@ -228,7 +297,7 @@ router.post('/', requireRole('client'), async (req, res) => {
       [newId, clientId, initialStatus, notes || null, total]
     );
 
-    // Insertar items (snapshot)
+    // Insertar items (snapshot frozen)
     for (const it of itemsToInsert) {
       await client.query(
         `INSERT INTO order_items (order_id, product_id, product_name, sku, quantity, unit_price, unit)
@@ -239,10 +308,11 @@ router.post('/', requireRole('client'), async (req, res) => {
 
     await client.query('COMMIT');
     return res.status(201).json({
-      id:        newId,
-      status:    initialStatus,
+      id:          newId,
+      status:      initialStatus,
       total,
-      createdAt: new Date().toISOString(),
+      priceListId: orderPriceListId,
+      createdAt:   new Date().toISOString(),
     });
   } catch (err) {
     await client.query('ROLLBACK');

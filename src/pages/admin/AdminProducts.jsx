@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Plus,
   Search,
@@ -144,15 +144,7 @@ export default function AdminProducts() {
   const [importing, setImporting] = useState(false);
   const importFileRef = useRef(null);
 
-  const filtered = products.filter((p) => {
-    const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase());
-    const matchCat = filterCategory
-      ? p.categoryId === Number(filterCategory)
-      : true;
-    return matchSearch && matchCat;
-  });
+  const filtered = products;
 
   function getCategoryName(id) {
     return categories.find((c) => c.id === id)?.name || "—";
@@ -293,6 +285,28 @@ export default function AdminProducts() {
     }
     setImportStep(IMPORT_STEPS.DONE);
   }
+
+  // 1. Escuchar los cambios en la búsqueda y categoría para consultar la API
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        // Llama a tu API pasando los parámetros de búsqueda.
+        // Asegúrate de que productsApi.getAll (o el método que uses) acepte y envíe estos query params.
+        const response = await productsApi.getAll({
+          search: search || undefined,
+          categoryId: filterCategory || undefined,
+          limit: 100, // Opcional, puedes aumentarlo si lo deseas
+        });
+
+        // Actualizamos el estado global con los resultados que devolvió el backend
+        setProducts(response.data || response);
+      } catch (err) {
+        console.error("Error al buscar en la API:", err);
+      }
+    }, 500); // Espera 500ms antes de disparar la búsqueda
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [search, filterCategory, setProducts]);
 
   const inputClass =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent";

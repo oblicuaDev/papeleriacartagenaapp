@@ -21,9 +21,13 @@ import ClientConfirmOrder from './pages/client/ClientConfirmOrder';
 import ClientApproveOrders from './pages/client/ClientApproveOrders';
 import ClientOrderDetail from './pages/client/ClientOrderDetail';
 import ClientManage from './pages/client/ClientManage';
+import ClientStats from './pages/client/ClientStats';
 import AdvisorLayout from './pages/advisor/AdvisorLayout';
 import AdvisorOrders from './pages/advisor/AdvisorOrders';
 import AdvisorOrderDetail from './pages/advisor/AdvisorOrderDetail';
+import DeliveryLayout from './pages/delivery/DeliveryLayout';
+import DeliveryOrders from './pages/delivery/DeliveryOrders';
+import DeliveryOrderDetail from './pages/delivery/DeliveryOrderDetail';
 
 export default function App() {
   return (
@@ -63,6 +67,7 @@ export default function App() {
             <Route path="confirmar-pedido" element={<ClientConfirmOrder />} />
             <Route path="aprobar-pedidos" element={<ClientApproveOrders />} />
             <Route path="pedidos/:orderId" element={<ClientOrderDetail />} />
+            <Route path="estadisticas" element={<ClientStats />} />
             <Route path="administrar" element={<ClientManage />} />
           </Route>
           <Route
@@ -75,6 +80,17 @@ export default function App() {
           >
             <Route index element={<AdvisorOrders />} />
             <Route path="pedido/:orderId" element={<AdvisorOrderDetail />} />
+          </Route>
+          <Route
+            path="/entregas"
+            element={
+              <ProtectedRoute allowedRole="delivery">
+                <DeliveryLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<DeliveryOrders />} />
+            <Route path="pedido/:orderId" element={<DeliveryOrderDetail />} />
           </Route>
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>

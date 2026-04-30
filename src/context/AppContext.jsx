@@ -56,6 +56,11 @@ export function AppProvider({ children }) {
         catalogApi.list({ limit: 100 }).then(r => r.data ?? r),
         ordersApi.list({ limit: 100 }).then(r => r.data ?? r),
       );
+    } else if (role === 'delivery') {
+      // Backend ya filtra por estados operativos (Alistamiento / En Ruta / Entregado).
+      loaders.push(
+        ordersApi.list({ limit: 100 }).then(r => r.data ?? r),
+      );
     }
 
     Promise.allSettled(loaders).then(results => {
@@ -78,6 +83,8 @@ export function AppProvider({ children }) {
       } else if (role === 'client') {
         setProducts(get(1) || []);
         setOrders(get(2)   || []);
+      } else if (role === 'delivery') {
+        setOrders(get(1) || []);
       }
       setLoadingApp(false);
     });
@@ -150,6 +157,7 @@ export function AppProvider({ children }) {
 
   async function refreshProducts() {
     const role = currentUser?.role;
+    if (role === 'delivery') return; // delivery no consulta catalogo
     if (role === 'client') {
       const res = await catalogApi.list({ limit: 100 });
       setProducts(res.data ?? res);

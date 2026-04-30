@@ -19,9 +19,10 @@ export default function Login() {
     setLoading(true);
     try {
       const result = await login(email, password);
-      if (result.role === 'admin')   navigate('/admin');
+      if (result.role === 'admin')        navigate('/admin');
       else if (result.role === 'advisor') navigate('/asesor');
       else if (result.role === 'client')  navigate('/cliente');
+      else if (result.role === 'delivery')navigate('/entregas');
     } catch (err) {
       setError(err.data?.error || 'Credenciales incorrectas. Verifica tu email y contraseña.');
     } finally {

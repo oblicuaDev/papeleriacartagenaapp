@@ -132,11 +132,13 @@ export const ordersApi = {
   get:    (id)              => get(`/orders/${id}`),
   create: (data)            => post('/orders', data),
   update: (id, data)        => put(`/orders/${id}`, data),
+  timeline: (id)            => get(`/orders/${id}/timeline`),
   addComment:    (oId, txt) => post(`/orders/${oId}/comments`, { text: txt }),
   removeComment: (oId, cId) => del(`/orders/${oId}/comments/${cId}`),
-  uploadAttachment: (oId, file) => {
+  uploadAttachment: (oId, file, type) => {
     const fd = new FormData();
     fd.append('file', file);
+    if (type) fd.append('type', type);
     return postForm(`/orders/${oId}/attachments`, fd);
   },
   getDownloadUrl: (oId, aId) => get(`/orders/${oId}/attachments/${aId}/download`),
@@ -147,4 +149,5 @@ export const ordersApi = {
 export const statsApi = {
   admin:  () => get('/stats/admin'),
   advisor: () => get('/stats/advisor'),
+  client: () => get('/stats/client'),
 };

@@ -11,7 +11,7 @@
  *   updateOrder  – fn(orderId, updates) from AppContext
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { ordersApi } from '../services/api';
 import {
@@ -19,16 +19,28 @@ import {
   Paperclip, FileText, File, ImageIcon, X,
   MessageSquare, User, Calendar, Package,
   UserCog, Download, FileDown, Sheet,
+  Clock, ArrowRight, FileBadge,
 } from 'lucide-react';
 import { STATUS_STYLES, ORDER_STATUSES, formatCOP } from '../data/mockData';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function fileIcon(type = '') {
-  if (type.startsWith('image/')) return <ImageIcon className="w-4 h-4 text-blue-500" />;
-  if (type === 'application/pdf') return <FileText className="w-4 h-4 text-red-500" />;
+// Categoria semantica del adjunto (PHASE 6+7)
+function attachmentIcon(att) {
+  if (att.type === 'purchase_order') return <FileBadge className="w-4 h-4 text-emerald-600" />;
+  if (att.type === 'evidence')       return <CheckCircle2 className="w-4 h-4 text-blue-500" />;
+  if (att.mimeType?.startsWith('image/'))     return <ImageIcon className="w-4 h-4 text-blue-500" />;
+  if (att.mimeType === 'application/pdf')     return <FileText className="w-4 h-4 text-red-500" />;
   return <File className="w-4 h-4 text-gray-500" />;
 }
+
+const ATTACH_TYPE_LABEL = {
+  general:        'General',
+  evidence:       'Evidencia',
+  invoice:        'Factura',
+  receipt:        'Recibo',
+  purchase_order: 'Orden de compra',
+};
 
 function formatBytes(bytes) {
   if (!bytes) return '';
@@ -45,9 +57,10 @@ function formatDateTime(iso) {
 
 function roleBadge(role) {
   const map = {
-    admin:   { label: 'Admin',   cls: 'bg-blue-100 text-blue-700' },
-    advisor: { label: 'Asesor',  cls: 'bg-purple-100 text-purple-700' },
-    client:  { label: 'Cliente', cls: 'bg-emerald-100 text-emerald-700' },
+    admin:    { label: 'Admin',     cls: 'bg-blue-100 text-blue-700' },
+    advisor:  { label: 'Asesor',    cls: 'bg-purple-100 text-purple-700' },
+    client:   { label: 'Cliente',   cls: 'bg-emerald-100 text-emerald-700' },
+    delivery: { label: 'Repartidor', cls: 'bg-orange-100 text-orange-700' },
   };
   const r = map[role] || { label: role, cls: 'bg-gray-100 text-gray-600' };
   return (
@@ -74,10 +87,39 @@ export default function OrderDetailCRM({
   const [localAttachments, setLocalAttachments] = useState(order.attachments || []);
   const [commentSaving, setCommentSaving]   = useState(false);
   const [attachUploading, setAttachUploading] = useState(false);
+  const [attachType, setAttachType] = useState(
+    currentUser?.role === 'delivery' ? 'evidence' : 'general'
+  );
+  const [attachError, setAttachError] = useState(null);
   const fileInputRef = useRef(null);
+
+  // Tipos seleccionables al subir (purchase_order es solo automatico).
+  const isDelivery = currentUser?.role === 'delivery';
+  const SELECTABLE_TYPES = isDelivery
+    ? [{ value: 'evidence', label: 'Evidencia de entrega' }]
+    : [
+        { value: 'general',  label: 'General' },
+        { value: 'evidence', label: 'Evidencia' },
+        { value: 'invoice',  label: 'Factura' },
+        { value: 'receipt',  label: 'Recibo' },
+      ];
 
   const { products } = useApp();
   const advisors = users.filter(u => u.role === 'advisor');
+
+  // PHASE 6: timeline cronologica del pedido
+  const [timeline, setTimeline]               = useState(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setTimelineLoading(true);
+    ordersApi.timeline(order.id)
+      .then(res => { if (!cancelled) setTimeline(res.events || []); })
+      .catch(() => { if (!cancelled) setTimeline([]); })
+      .finally(() => { if (!cancelled) setTimelineLoading(false); });
+    return () => { cancelled = true; };
+    // Recargar cuando cambia el status (despues de un save) o al subir adjunto/comentario
+  }, [order.id, status, localComments.length, localAttachments.length]);
   const client   = users.find(u => u.id === order.clientId);
   const advisor  = users.find(u => u.id === order.advisorId);
 
@@ -116,9 +158,14 @@ export default function OrderDetailCRM({
     const file = e.target.files?.[0];
     if (!file || attachUploading) return;
     setAttachUploading(true);
+    setAttachError(null);
     try {
-      const saved = await ordersApi.uploadAttachment(order.id, file);
+      const saved = await ordersApi.uploadAttachment(order.id, file, attachType);
       setLocalAttachments(prev => [...prev, saved]);
+      // Reset input para permitir re-subir el mismo archivo
+      e.target.value = '';
+    } catch (err) {
+      setAttachError(err?.message || 'No se pudo subir el archivo');
     } finally {
       setAttachUploading(false);
       e.target.value = '';
@@ -344,6 +391,70 @@ export default function OrderDetailCRM({
             </div>
           )}
 
+          {/* ── Timeline section (PHASE 6) ────────────────────────────── */}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-gray-500" />
+              <h3 className="text-sm font-semibold text-gray-800">Historial</h3>
+              {timeline && (
+                <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full font-medium ml-auto">
+                  {timeline.length}
+                </span>
+              )}
+            </div>
+            <div className="px-6 py-4">
+              {timelineLoading ? (
+                <p className="text-xs text-gray-400 py-2">Cargando...</p>
+              ) : !timeline || timeline.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-4">Sin eventos registrados</p>
+              ) : (
+                <ul className="space-y-3">
+                  {timeline.map((ev, idx) => (
+                    <li key={idx} className="flex gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className="w-7 h-7 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center flex-shrink-0">
+                          {ev.eventType === 'status'     && <ArrowRight className="w-3.5 h-3.5" />}
+                          {ev.eventType === 'comment'    && <MessageSquare className="w-3.5 h-3.5" />}
+                          {ev.eventType === 'attachment' && <Paperclip className="w-3.5 h-3.5" />}
+                        </div>
+                        {idx < timeline.length - 1 && (
+                          <div className="w-px flex-1 bg-gray-200 mt-1" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0 pb-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-semibold text-gray-700">
+                            {ev.actorName || 'Sistema'}
+                          </span>
+                          {ev.actorRole && roleBadge(ev.actorRole)}
+                          <span className="text-xs text-gray-400 ml-auto">{formatDateTime(ev.occurredAt)}</span>
+                        </div>
+                        <div className="text-sm text-gray-700 mt-1">
+                          {ev.eventType === 'status' && (
+                            ev.payload?.fromStatus
+                              ? <>Cambio de <span className="font-medium">{ev.payload.fromStatus}</span> a <span className="font-medium">{ev.payload.toStatus}</span>{ev.payload.reason && <span className="text-gray-500"> — {ev.payload.reason}</span>}</>
+                              : <>Pedido creado en <span className="font-medium">{ev.payload?.toStatus}</span></>
+                          )}
+                          {ev.eventType === 'comment' && (
+                            <span className="italic text-gray-600">«{ev.payload?.text}»</span>
+                          )}
+                          {ev.eventType === 'attachment' && (
+                            <>
+                              Subio <span className="font-medium">{ev.payload?.fileName}</span>
+                              {ev.payload?.type && ev.payload.type !== 'general' && (
+                                <span className="text-xs ml-1 text-gray-500">({ATTACH_TYPE_LABEL[ev.payload.type]})</span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
           {/* ── Comments section ─────────────────────────────────────── */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
@@ -434,10 +545,17 @@ export default function OrderDetailCRM({
               )}
               {attachments.map(att => (
                 <div key={att.id} className="flex items-center gap-2.5 p-2.5 bg-gray-50 rounded-lg border border-gray-100 group">
-                  <div className="flex-shrink-0">{fileIcon(att.type)}</div>
+                  <div className="flex-shrink-0">{attachmentIcon(att)}</div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-gray-700 truncate">{att.name}</p>
-                    <p className="text-xs text-gray-400">{formatBytes(att.size)}</p>
+                    <p className="text-xs font-medium text-gray-700 truncate">{att.fileName || att.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs text-gray-400">{formatBytes(att.fileSize || att.size)}</p>
+                      {att.type && att.type !== 'general' && (
+                        <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
+                          {ATTACH_TYPE_LABEL[att.type] || att.type}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button
@@ -459,9 +577,27 @@ export default function OrderDetailCRM({
                 </div>
               ))}
 
-              {/* Upload button (editable only) */}
+              {/* Upload (editable only) */}
               {editable && (
-                <>
+                <div className="space-y-2 mt-2">
+                  {/* Type selector — solo si hay mas de una opcion */}
+                  {SELECTABLE_TYPES.length > 1 && (
+                    <select
+                      value={attachType}
+                      onChange={e => setAttachType(e.target.value)}
+                      disabled={attachUploading}
+                      className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      {SELECTABLE_TYPES.map(t => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                  )}
+                  {isDelivery && (
+                    <p className="text-[11px] text-orange-700 bg-orange-50 border border-orange-100 rounded px-2 py-1">
+                      Solo evidencia de entrega.
+                    </p>
+                  )}
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -470,12 +606,18 @@ export default function OrderDetailCRM({
                   />
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 border-2 border-dashed border-gray-200 rounded-lg text-xs font-medium text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition mt-2"
+                    disabled={attachUploading}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 border-2 border-dashed border-gray-200 rounded-lg text-xs font-medium text-gray-500 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition"
                   >
                     <Paperclip className="w-3.5 h-3.5" />
-                    Adjuntar archivo
+                    {attachUploading ? 'Subiendo...' : 'Adjuntar archivo'}
                   </button>
-                </>
+                  {attachError && (
+                    <p className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded px-2 py-1">
+                      {attachError}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
 

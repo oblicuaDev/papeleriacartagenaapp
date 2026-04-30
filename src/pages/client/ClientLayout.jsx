@@ -1,7 +1,7 @@
 import logo from '../../logo-cartagena.jpg';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { ShoppingCart, LogOut, X, Minus, Plus, Trash2, Search, ClipboardCheck, Users } from 'lucide-react';
+import { ShoppingCart, LogOut, X, Minus, Plus, Trash2, Search, ClipboardCheck, Users, BarChart3 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { formatCOP } from '../../data/mockData';
@@ -78,6 +78,15 @@ export default function ClientLayout() {
               }
             >
               Mis Pedidos
+            </NavLink>
+            <NavLink
+              to="/cliente/estadisticas"
+              className={({ isActive }) =>
+                `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${isActive ? 'bg-white bg-opacity-20 text-white' : 'text-blue-200 hover:text-white hover:bg-white hover:bg-opacity-10'}`
+              }
+            >
+              <BarChart3 className="w-4 h-4" />
+              Estadísticas
             </NavLink>
             {isSupervisor && (
               <>

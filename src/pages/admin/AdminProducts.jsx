@@ -292,7 +292,7 @@ export default function AdminProducts() {
       try {
         // Llama a tu API pasando los parámetros de búsqueda.
         // Asegúrate de que productsApi.getAll (o el método que uses) acepte y envíe estos query params.
-        const response = await productsApi.getAll({
+        const response = await productsApi.list({
           search: search || undefined,
           categoryId: filterCategory || undefined,
           limit: 100, // Opcional, puedes aumentarlo si lo deseas

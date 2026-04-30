@@ -8,16 +8,32 @@ import { formatCOP } from '../../data/mockData';
 export default function ClientConfirmOrder() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { cart, cartTotal, updateCartItem, removeFromCart, submitOrder } = useApp();
+  const { cart, cartTotal, updateCartItem, removeFromCart, submitOrder, refreshProducts } = useApp();
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState(null);
 
-  function handleSubmit() {
-    const initialStatus = currentUser?.clientRole === 'creador_pedidos'
-      ? 'Pendiente por aprobar'
-      : 'Pendiente';
-    const orderId = submitOrder(currentUser.id, null, notes, initialStatus);
-    setSubmitted(orderId);
+  async function handleSubmit() {
+    setErrorMsg(null);
+    setSubmitting(true);
+    try {
+      const orderId = await submitOrder(currentUser.id, null, notes);
+      setSubmitted(orderId);
+    } catch (err) {
+      // Backend rechazo el pedido. Distinguimos mismatches de precio (409 con detail).
+      if (err?.status === 409 && Array.isArray(err?.data?.mismatches)) {
+        await refreshProducts?.();
+        const lines = err.data.mismatches.map(m =>
+          `• ${m.productName}: pediste $${m.clientPrice}, ahora cuesta $${m.backendPrice}`
+        ).join('\n');
+        setErrorMsg(`El precio cambio mientras armabas el pedido. Recargamos el catalogo:\n${lines}`);
+      } else {
+        setErrorMsg(err?.message || 'No se pudo enviar el pedido');
+      }
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (cart.length === 0 && !submitted) {
@@ -153,12 +169,20 @@ export default function ClientConfirmOrder() {
         />
       </div>
 
+      {/* Error */}
+      {errorMsg && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm whitespace-pre-line">
+          {errorMsg}
+        </div>
+      )}
+
       {/* Submit */}
       <button
         onClick={handleSubmit}
-        className="w-full py-4 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-base font-bold transition shadow-sm"
+        disabled={submitting}
+        className="w-full py-4 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-300 text-white rounded-xl text-base font-bold transition shadow-sm"
       >
-        Enviar mi pedido
+        {submitting ? 'Enviando...' : 'Enviar mi pedido'}
       </button>
     </div>
   );

@@ -117,14 +117,17 @@ export function AppProvider({ children }) {
   function clearCart() { setCart([]); }
 
   // ── Crear pedido → API ──────────────────────────────────────
-  async function submitOrder(clientId, advisorId, notes) {
+  // Backend resuelve precio (sucursal > company > user > base) y rechaza
+  // mismatches con 409. Mandamos unitPrice solo como verificacion: si el
+  // backend ve algo distinto, lanza error y mostramos al usuario que el
+  // precio cambio.
+  async function submitOrder(_clientId, _advisorId, notes) {
     const items = cart.map(i => ({
       productId: i.productId,
       quantity:  i.quantity,
-      unitPrice: i.unitPrice,
+      unitPrice: i.unitPrice,    // verificacion contra precio backend
     }));
     const created = await ordersApi.create({ notes, items });
-    // Actualizar lista local
     setOrders(prev => [created, ...prev]);
     clearCart();
     return created.id;

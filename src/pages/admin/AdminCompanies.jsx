@@ -19,11 +19,18 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-const EMPTY_COMPANY = { name: '', nit: '', email: '', phone: '', address: '' };
-const EMPTY_SUCURSAL = { name: '', address: '', city: '' };
+const EMPTY_COMPANY  = { name: '', nit: '', email: '', phone: '', address: '', advisorId: '', priceListId: '' };
+const EMPTY_SUCURSAL = { name: '', address: '', city: '', advisorId: '', priceListId: '' };
+
+// Convierte "" -> null para selects opcionales (deja undefined fuera de payload)
+function nullable(value) {
+  if (value === '' || value === undefined || value === null) return null;
+  return Number(value);
+}
 
 export default function AdminCompanies() {
-  const { companies, refreshCompanies } = useApp();
+  const { companies, refreshCompanies, users, priceLists } = useApp();
+  const advisors = (users || []).filter(u => u.role === 'advisor' && u.active);
   const [expandedId, setExpandedId] = useState(null);
   const [showCompanyModal, setShowCompanyModal] = useState(false);
   const [editingCompany, setEditingCompany] = useState(null);
@@ -45,16 +52,33 @@ export default function AdminCompanies() {
 
   function openEditCompany(company) {
     setEditingCompany(company);
-    setCompanyForm({ name: company.name, nit: company.nit, email: company.email, phone: company.phone, address: company.address });
+    setCompanyForm({
+      name:        company.name        || '',
+      nit:         company.nit         || '',
+      email:       company.email       || '',
+      phone:       company.phone       || '',
+      address:     company.address     || '',
+      advisorId:   company.advisorId   ?? '',
+      priceListId: company.priceListId ?? '',
+    });
     setShowCompanyModal(true);
   }
 
   async function handleSaveCompany() {
     if (!companyForm.name) return;
+    const payload = {
+      name:        companyForm.name,
+      nit:         companyForm.nit         || null,
+      email:       companyForm.email       || null,
+      phone:       companyForm.phone       || null,
+      address:     companyForm.address     || null,
+      advisorId:   nullable(companyForm.advisorId),
+      priceListId: nullable(companyForm.priceListId),
+    };
     if (editingCompany) {
-      await companiesApi.update(editingCompany.id, companyForm);
+      await companiesApi.update(editingCompany.id, payload);
     } else {
-      await companiesApi.create(companyForm);
+      await companiesApi.create(payload);
     }
     await refreshCompanies();
     setShowCompanyModal(false);
@@ -76,17 +100,30 @@ export default function AdminCompanies() {
 
   function openEditSucursal(companyId, sucursal) {
     setEditingSucursal(sucursal);
-    setSucursalForm({ name: sucursal.name, address: sucursal.address, city: sucursal.city });
+    setSucursalForm({
+      name:        sucursal.name        || '',
+      address:     sucursal.address     || '',
+      city:        sucursal.city        || '',
+      advisorId:   sucursal.advisorId   ?? '',
+      priceListId: sucursal.priceListId ?? '',
+    });
     setSucursalTargetCompanyId(companyId);
     setShowSucursalModal(true);
   }
 
   async function handleSaveSucursal() {
     if (!sucursalForm.name) return;
+    const payload = {
+      name:        sucursalForm.name,
+      address:     sucursalForm.address || null,
+      city:        sucursalForm.city    || null,
+      advisorId:   nullable(sucursalForm.advisorId),
+      priceListId: nullable(sucursalForm.priceListId),
+    };
     if (editingSucursal) {
-      await sucursalesApi.update(sucursalTargetCompanyId, editingSucursal.id, sucursalForm);
+      await sucursalesApi.update(sucursalTargetCompanyId, editingSucursal.id, payload);
     } else {
-      await sucursalesApi.create(sucursalTargetCompanyId, sucursalForm);
+      await sucursalesApi.create(sucursalTargetCompanyId, payload);
     }
     await refreshCompanies();
     setShowSucursalModal(false);
@@ -292,6 +329,37 @@ export default function AdminCompanies() {
                 placeholder="Cra 7 # 15-30, Bogotá"
               />
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelClass}>Asesor asignado</label>
+                <select
+                  className={inputClass}
+                  value={companyForm.advisorId}
+                  onChange={e => setCompanyForm(f => ({ ...f, advisorId: e.target.value }))}
+                >
+                  <option value="">— Sin asignar —</option>
+                  {advisors.map(a => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Se asigna automáticamente a sus pedidos.</p>
+              </div>
+              <div>
+                <label className={labelClass}>Lista de precios</label>
+                <select
+                  className={inputClass}
+                  value={companyForm.priceListId}
+                  onChange={e => setCompanyForm(f => ({ ...f, priceListId: e.target.value }))}
+                >
+                  <option value="">— Sin lista —</option>
+                  {(priceLists || []).map(pl => (
+                    <option key={pl.id} value={pl.id}>{pl.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             <div className="flex gap-3 pt-2">
               <button
                 onClick={() => setShowCompanyModal(false)}
@@ -344,6 +412,41 @@ export default function AdminCompanies() {
                 placeholder="Cra 15 # 85-20"
               />
             </div>
+
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 space-y-3">
+              <p className="text-xs font-semibold text-blue-800 uppercase tracking-wider">
+                Overrides por sucursal (opcional)
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelClass}>Asesor</label>
+                  <select
+                    className={inputClass}
+                    value={sucursalForm.advisorId}
+                    onChange={e => setSucursalForm(f => ({ ...f, advisorId: e.target.value }))}
+                  >
+                    <option value="">— Hereda de empresa —</option>
+                    {advisors.map(a => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClass}>Lista de precios</label>
+                  <select
+                    className={inputClass}
+                    value={sucursalForm.priceListId}
+                    onChange={e => setSucursalForm(f => ({ ...f, priceListId: e.target.value }))}
+                  >
+                    <option value="">— Hereda de empresa —</option>
+                    {(priceLists || []).map(pl => (
+                      <option key={pl.id} value={pl.id}>{pl.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div className="flex gap-3 pt-2">
               <button
                 onClick={() => setShowSucursalModal(false)}

@@ -3,7 +3,7 @@ import { useOutletContext } from 'react-router-dom';
 import { ShoppingCart, Grid, List, Plus, Minus, X, Package } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { getPrice, formatCOP } from '../../data/mockData';
+import { formatCOP } from '../../data/mockData';
 import productFallback from '../../product.webp';
 
 const CATEGORY_COLORS = [
@@ -112,14 +112,12 @@ function ProductModal({ product, price, categoryName, categoryColor, onClose, on
 export default function ClientCatalog() {
   const context = useOutletContext() || {};
   const headerSearch = context.search || '';
-  const { products, categories, priceLists, addToCart } = useApp();
-  const { currentUser } = useAuth();
+  const { products, categories, addToCart } = useApp();
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [viewMode, setViewMode] = useState('grid');
   const [modalProduct, setModalProduct] = useState(null);
 
   const search = headerSearch;
-  const priceListId = currentUser?.priceListId || 1;
 
   function getCategoryName(id) {
     return categories.find(c => c.id === id)?.name || '—';
@@ -130,8 +128,8 @@ export default function ClientCatalog() {
     return CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
   }
 
+  // /catalog ya filtra active=true en backend; aqui solo aplicamos UI filters
   const filtered = products.filter(p => {
-    if (!p.active) return false;
     const matchSearch =
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku.toLowerCase().includes(search.toLowerCase());
@@ -140,11 +138,11 @@ export default function ClientCatalog() {
   });
 
   function handleAdd(product, qty) {
-    const unitPrice = getPrice(product.basePrice, priceListId, priceLists);
-    addToCart(product, qty, unitPrice);
+    // product.price ya viene resuelto por backend (sucursal > company > user > base)
+    addToCart(product, qty, product.price);
   }
 
-  const modalPrice = modalProduct ? getPrice(modalProduct.basePrice, priceListId, priceLists) : 0;
+  const modalPrice = modalProduct ? modalProduct.price : 0;
 
   return (
     <div className="space-y-5">
@@ -200,7 +198,7 @@ export default function ClientCatalog() {
       {viewMode === 'grid' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {filtered.map(product => {
-            const price = getPrice(product.basePrice, priceListId, priceLists);
+            const price = product.price;
             return (
               <div
                 key={product.id}
@@ -257,7 +255,7 @@ export default function ClientCatalog() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map(product => {
-                  const price = getPrice(product.basePrice, priceListId, priceLists);
+                  const price = product.price;
                   return (
                     <tr
                       key={product.id}

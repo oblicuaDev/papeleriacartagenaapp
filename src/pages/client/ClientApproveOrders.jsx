@@ -4,6 +4,73 @@ import { useApp } from '../../context/AppContext';
 import { STATUS_STYLES, formatCOP } from '../../data/mockData';
 import { useState } from 'react';
 
+function RejectModal({ order, onConfirm, onCancel }) {
+  const [reason, setReason] = useState('');
+  const [error, setError]   = useState('');
+
+  function handleConfirm() {
+    if (!reason.trim()) {
+      setError('Debes indicar el motivo del rechazo');
+      return;
+    }
+    onConfirm(reason.trim());
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black bg-opacity-60">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="p-6 space-y-5">
+          <div className="flex justify-center">
+            <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center">
+              <XCircle className="w-7 h-7 text-red-600" />
+            </div>
+          </div>
+
+          <div className="text-center space-y-2">
+            <h3 className="text-lg font-bold text-gray-900">Rechazar pedido</h3>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Indica el motivo del rechazo. Quedara registrado en el historial del pedido.
+            </p>
+            {order && (
+              <p className="text-xs font-mono text-gray-400 bg-gray-50 rounded-lg px-3 py-1.5 inline-block">
+                {order.id} · {formatCOP(order.total)}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <textarea
+              value={reason}
+              onChange={e => { setReason(e.target.value); setError(''); }}
+              rows={3}
+              placeholder="Ej: producto agotado, cantidad excede limite mensual..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
+              maxLength={500}
+            />
+            {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={onCancel}
+              className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleConfirm}
+              className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2"
+            >
+              <XCircle className="w-4 h-4" />
+              Rechazar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConfirmApproveModal({ order, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black bg-opacity-60">
@@ -141,33 +208,48 @@ function OrderDetailModal({ order, clientName, onApprove, onReject, onClose }) {
 export default function ClientApproveOrders() {
   const { currentUser } = useAuth();
   const { orders, updateOrder, users } = useApp();
-  const [selectedOrder, setSelectedOrder]       = useState(null);
-  const [confirmOrder, setConfirmOrder]         = useState(null); // order pending confirm modal
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [confirmOrder, setConfirmOrder]   = useState(null); // approve confirmation
+  const [rejectOrder, setRejectOrder]     = useState(null); // reject confirmation
+  const [actionError, setActionError]     = useState(null);
 
-  const companyClientIds = users
-    .filter(u => u.role === 'client' && u.companyId === currentUser?.companyId)
-    .map(u => u.id);
-
-  const pendingOrders = orders.filter(
-    o => o.status === 'Pendiente por aprobar' && companyClientIds.includes(o.clientId)
-  ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Backend ya filtra por empresa, asi que solo filtramos por estado.
+  const pendingOrders = orders
+    .filter(o => o.status === 'Pendiente por aprobar')
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   function getClientName(clientId) {
     return users.find(u => u.id === clientId)?.name || '—';
   }
 
   function requestApprove(order) {
-    setSelectedOrder(null); // close detail modal if open
+    setSelectedOrder(null);
     setConfirmOrder(order);
   }
 
-  function confirmApprove() {
-    updateOrder(confirmOrder.id, { status: 'Pendiente' });
-    setConfirmOrder(null);
+  function requestReject(order) {
+    setSelectedOrder(null);
+    setRejectOrder(order);
   }
 
-  function handleReject(orderId) {
-    updateOrder(orderId, { status: 'Rechazado' });
+  async function confirmApprove() {
+    setActionError(null);
+    try {
+      await updateOrder(confirmOrder.id, { status: 'Pendiente' });
+      setConfirmOrder(null);
+    } catch (err) {
+      setActionError(err?.message || 'No se pudo aprobar');
+    }
+  }
+
+  async function confirmReject(reason) {
+    setActionError(null);
+    try {
+      await updateOrder(rejectOrder.id, { status: 'Rechazado', reason });
+      setRejectOrder(null);
+    } catch (err) {
+      setActionError(err?.message || 'No se pudo rechazar');
+    }
   }
 
   const statusStyle = STATUS_STYLES['Pendiente por aprobar'];
@@ -242,7 +324,7 @@ export default function ClientApproveOrders() {
                     Ver detalle
                   </button>
                   <button
-                    onClick={() => handleReject(order.id)}
+                    onClick={() => requestReject(order)}
                     className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
                     title="Rechazar"
                   >
@@ -262,13 +344,23 @@ export default function ClientApproveOrders() {
         </div>
       )}
 
+      {/* Action error toast */}
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="text-red-400 hover:text-red-600">
+            <XCircle className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Detail modal */}
       {selectedOrder && (
         <OrderDetailModal
           order={selectedOrder}
           clientName={getClientName(selectedOrder.clientId)}
           onApprove={requestApprove}
-          onReject={handleReject}
+          onReject={(_id) => requestReject(selectedOrder)}
           onClose={() => setSelectedOrder(null)}
         />
       )}
@@ -279,6 +371,15 @@ export default function ClientApproveOrders() {
           order={confirmOrder}
           onConfirm={confirmApprove}
           onCancel={() => setConfirmOrder(null)}
+        />
+      )}
+
+      {/* Reject modal */}
+      {rejectOrder && (
+        <RejectModal
+          order={rejectOrder}
+          onConfirm={confirmReject}
+          onCancel={() => setRejectOrder(null)}
         />
       )}
     </div>

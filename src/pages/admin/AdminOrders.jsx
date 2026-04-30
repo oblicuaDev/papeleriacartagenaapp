@@ -1,13 +1,49 @@
 import { useState } from 'react';
-import { ChevronDown, ExternalLink } from 'lucide-react';
+import { ChevronDown, ExternalLink, Download } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { STATUS_STYLES, ORDER_STATUSES, formatCOP } from '../../data/mockData';
+
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
+
+async function downloadExport(format, filterStatus) {
+  const token = localStorage.getItem('pc_token');
+  const url = new URL(`${API_BASE}/stats/orders/export`, window.location.origin);
+  url.searchParams.set('format', format);
+  if (filterStatus) url.searchParams.set('status', filterStatus);
+
+  const res = await fetch(url.toString().replace(window.location.origin, ''), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Export fallo: HTTP ${res.status}`);
+
+  const blob = await res.blob();
+  const filename = `pedidos_${new Date().toISOString().slice(0, 10)}.${format}`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
 
 export default function AdminOrders() {
   const { orders, users } = useApp();
   const navigate          = useNavigate();
   const [filterStatus, setFilterStatus] = useState('');
+  const [exporting, setExporting]       = useState(false);
+
+  async function handleExport(format) {
+    setExporting(true);
+    try {
+      await downloadExport(format, filterStatus);
+    } catch (err) {
+      alert(err.message || 'No se pudo exportar');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   function getName(id) {
     return users.find(u => u.id === id)?.name || '—';
@@ -38,6 +74,24 @@ export default function AdminOrders() {
               {allStatuses.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+          <button
+            onClick={() => handleExport('csv')}
+            disabled={exporting}
+            className="flex items-center gap-1.5 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition"
+            title="Descargar CSV"
+          >
+            <Download className="w-4 h-4" />
+            CSV
+          </button>
+          <button
+            onClick={() => handleExport('xlsx')}
+            disabled={exporting}
+            className="flex items-center gap-1.5 border border-emerald-300 bg-emerald-50 rounded-lg px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition"
+            title="Descargar Excel"
+          >
+            <Download className="w-4 h-4" />
+            Excel
+          </button>
         </div>
       </div>
 

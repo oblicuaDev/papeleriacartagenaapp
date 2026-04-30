@@ -2,7 +2,8 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { resolvePriceListId, priceSqlFragment, resolveOrderRouting } from '../lib/pricing.js';
-import { ensurePurchaseOrderPdf } from '../lib/purchaseOrderPdf.js';
+import { ensurePurchaseOrderPdf, loadOrderContext } from '../lib/purchaseOrderPdf.js';
+import { buildOrderDetailXlsx } from '../lib/orderExport.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -136,6 +137,31 @@ async function canViewOrder(req, order) {
   }
   return false;
 }
+
+// GET /orders/:id/export.xlsx — Excel detallado de un pedido
+router.get('/:id/export.xlsx', async (req, res) => {
+  const orderId = req.params.id.toUpperCase();
+  try {
+    const { rows: head } = await pool.query(
+      `SELECT id, client_id, advisor_id, status FROM orders WHERE id = $1`,
+      [orderId]
+    );
+    if (!head[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (!(await canViewOrder(req, head[0]))) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    const { order, items } = await loadOrderContext(orderId);
+    const buf = await buildOrderDetailXlsx({ order, items });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${orderId}.xlsx"`);
+    return res.send(buf);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error generando el Excel del pedido' });
+  }
+});
 
 // GET /orders/:id/timeline (PHASE 6)
 // Feed cronologico unificado: status changes + comments + attachments

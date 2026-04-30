@@ -1,0 +1,2153 @@
+{
+    "info": {
+        "name": "Papelería Cartagena API",
+        "description": "Backend B2B — orders, pricing, roles, exports.",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "auth": {
+        "type": "bearer",
+        "bearer": [
+            {
+                "key": "token",
+                "value": "{{token}}",
+                "type": "string"
+            }
+        ]
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:3000/api/v1"
+        },
+        {
+            "key": "token",
+            "value": ""
+        }
+    ],
+    "item": [
+        {
+            "name": "Auth",
+            "item": [
+                {
+                    "name": "Login",
+                    "request": {
+                        "auth": {
+                            "type": "noauth"
+                        },
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"email\": \"admin@papeleriacartagena.com\",\n  \"password\": \"***REMOVED***\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/login",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "login"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiJ9...\",\n  \"user\": {\n    \"id\": 1,\n    \"name\": \"Administrador\",\n    \"email\": \"admin@papeleriacartagena.com\",\n    \"role\": \"admin\",\n    \"clientRole\": null,\n    \"companyId\": null,\n    \"sucursalId\": null,\n    \"priceListId\": null,\n    \"branchId\": null,\n    \"initials\": \"A\"\n  }\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Logout",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/auth/logout",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "logout"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Sesión cerrada correctamente\"}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Me",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/auth/me",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "me"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"id\": 1,\n  \"name\": \"Administrador\",\n  \"email\": \"admin@papeleriacartagena.com\",\n  \"role\": \"admin\",\n  \"active\": true\n}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Products",
+            "item": [
+                {
+                    "name": "List products",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/products?active=true&page=1&limit=20",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "products"
+                            ],
+                            "query": [
+                                {
+                                    "key": "active",
+                                    "value": "true"
+                                },
+                                {
+                                    "key": "categoryId",
+                                    "value": "1",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "papel",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "priceListId",
+                                    "value": "2",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "20"
+                                }
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"data\": [\n    {\n      \"id\": 1,\n      \"name\": \"Resma Papel Bond 75g A4\",\n      \"sku\": \"PAP-001\",\n      \"category_id\": 1,\n      \"category_name\": \"Papel\",\n      \"description\": \"Resma de 500 hojas Bond 75g A4\",\n      \"base_price\": \"12500.00\",\n      \"price\": 11250,\n      \"price_list_id\": 2,\n      \"stock\": 150,\n      \"unit\": \"Resma\",\n      \"image_url\": null,\n      \"active\": true,\n      \"complementary_ids\": []\n    }\n  ],\n  \"total\": 20,\n  \"page\": 1,\n  \"limit\": 20,\n  \"priceListId\": 2\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Get product",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/products/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "products",
+                                "1"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"id\": 1,\n  \"name\": \"Resma Papel Bond 75g A4\",\n  \"sku\": \"PAP-001\",\n  \"category_id\": 1,\n  \"category_name\": \"Papel\",\n  \"base_price\": \"12500.00\",\n  \"price\": 11250,\n  \"price_list_id\": 2,\n  \"stock\": 150,\n  \"unit\": \"Resma\",\n  \"complementaries\": []\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create product",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Resma Papel 90g A4\",\n  \"sku\": \"PAP-006\",\n  \"categoryId\": 1,\n  \"description\": \"Resma de 500 hojas papel 90g A4\",\n  \"basePrice\": 18500,\n  \"stock\": 80,\n  \"unit\": \"Resma\",\n  \"active\": true,\n  \"complementaryIds\": [2, 3]\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/products",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "products"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"id\": 21,\n  \"name\": \"Resma Papel 90g A4\",\n  \"sku\": \"PAP-006\",\n  \"category_id\": 1,\n  \"base_price\": \"18500.00\",\n  \"stock\": 80,\n  \"unit\": \"Resma\",\n  \"active\": true,\n  \"complementaryIds\": [2, 3]\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Update product",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"basePrice\": 13000,\n  \"stock\": 200\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/products/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "products",
+                                "1"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":1,\"name\":\"Resma Papel Bond 75g A4\",\"base_price\":\"13000.00\",\"stock\":200}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Delete product",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/products/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "products",
+                                "1"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Producto desactivado\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Catalog",
+            "item": [
+                {
+                    "name": "List catalog (client)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/catalog?page=1&limit=20",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "catalog"
+                            ],
+                            "query": [
+                                {
+                                    "key": "categoryId",
+                                    "value": "1",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "papel",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "20"
+                                }
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"priceListId\": 2,\n  \"priceListName\": \"Lista B\",\n  \"data\": [\n    {\n      \"id\": 1,\n      \"name\": \"Resma Papel Bond 75g A4\",\n      \"sku\": \"PAP-001\",\n      \"category_id\": 1,\n      \"category_name\": \"Papel\",\n      \"description\": \"Resma de 500 hojas Bond 75g A4\",\n      \"price\": 11250,\n      \"stock\": 150,\n      \"unit\": \"Resma\",\n      \"image_url\": null,\n      \"complementary_ids\": []\n    }\n  ],\n  \"total\": 20,\n  \"page\": 1,\n  \"limit\": 20\n}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Orders",
+            "item": [
+                {
+                    "name": "List orders",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/orders?page=1&limit=20",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders"
+                            ],
+                            "query": [
+                                {
+                                    "key": "status",
+                                    "value": "Pendiente",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "clientId",
+                                    "value": "5",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "advisorId",
+                                    "value": "2",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "companyId",
+                                    "value": "1",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "dateFrom",
+                                    "value": "2026-04-01",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "dateTo",
+                                    "value": "2026-04-30",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "ORD",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "20"
+                                }
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"data\": [\n    {\n      \"id\": \"ORD-00001\",\n      \"client_id\": 5,\n      \"advisor_id\": 2,\n      \"status\": \"Pendiente\",\n      \"total\": \"33750.00\",\n      \"client_name\": \"Creador Pedidos\",\n      \"advisor_name\": \"Ana Martinez\",\n      \"item_count\": 2,\n      \"comment_count\": 0,\n      \"attachment_count\": 1,\n      \"created_at\": \"2026-04-29T22:33:41.000Z\"\n    }\n  ],\n  \"total\": 1,\n  \"page\": 1,\n  \"limit\": 20\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Get order",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/orders/ORD-00001",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders",
+                                "ORD-00001"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"id\": \"ORD-00001\",\n  \"client_id\": 5,\n  \"advisor_id\": 2,\n  \"status\": \"Pendiente\",\n  \"notes\": \"Entregar antes del viernes\",\n  \"total\": \"33750.00\",\n  \"client_name\": \"Creador Pedidos\",\n  \"company_id\": 1,\n  \"advisor_name\": \"Ana Martinez\",\n  \"items\": [\n    {\"id\": 1, \"product_id\": 1, \"product_name\": \"Resma Papel Bond 75g A4\", \"sku\": \"PAP-001\", \"quantity\": 3, \"unit_price\": \"11250.00\", \"unit\": \"Resma\"}\n  ],\n  \"comments\": [],\n  \"attachments\": [\n    {\"id\": 1, \"file_name\": \"Orden de compra ORD-00001.pdf\", \"mime_type\": \"application/pdf\", \"type\": \"purchase_order\", \"file_url\": \"http://localhost:3000/uploads/orden_compra_ORD-00001_1714429421.pdf\", \"uploaded_by_name\": \"Supervisor Centro\"}\n  ]\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Get order timeline",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/orders/ORD-00001/timeline",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders",
+                                "ORD-00001",
+                                "timeline"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"orderId\": \"ORD-00001\",\n  \"events\": [\n    {\n      \"event_type\": \"status\",\n      \"occurred_at\": \"2026-04-29T22:30:00Z\",\n      \"actor_id\": 5,\n      \"actor_name\": \"Creador Pedidos\",\n      \"actor_role\": \"client\",\n      \"payload\": {\"fromStatus\": null, \"toStatus\": \"Pendiente por aprobar\", \"reason\": null}\n    },\n    {\n      \"event_type\": \"status\",\n      \"occurred_at\": \"2026-04-29T22:34:00Z\",\n      \"actor_id\": 4,\n      \"actor_name\": \"Supervisor Centro\",\n      \"actor_role\": \"client\",\n      \"payload\": {\"fromStatus\": \"Pendiente por aprobar\", \"toStatus\": \"Pendiente\", \"reason\": null}\n    },\n    {\n      \"event_type\": \"attachment\",\n      \"occurred_at\": \"2026-04-29T22:34:01Z\",\n      \"actor_id\": 4,\n      \"actor_name\": \"Supervisor Centro\",\n      \"actor_role\": \"client\",\n      \"payload\": {\"attachmentId\": 1, \"fileName\": \"Orden de compra ORD-00001.pdf\", \"mimeType\": \"application/pdf\", \"fileSize\": 4821, \"fileUrl\": \"http://localhost:3000/uploads/orden_compra_ORD-00001_1714429421.pdf\", \"type\": \"purchase_order\"}\n    }\n  ]\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create order",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"notes\": \"Entregar antes del viernes\",\n  \"items\": [\n    {\"productId\": 1, \"quantity\": 3, \"unitPrice\": 11250},\n    {\"productId\": 2, \"quantity\": 1, \"unitPrice\": 10620}\n  ]\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/orders",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"id\": \"ORD-00001\",\n  \"status\": \"Pendiente por aprobar\",\n  \"total\": 44370,\n  \"priceListId\": 2,\n  \"advisorId\": 2,\n  \"createdAt\": \"2026-04-29T22:30:00.000Z\"\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Update order (transition / fields)",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"status\": \"Pendiente\",\n  \"reason\": null,\n  \"carrier\": null,\n  \"advisorId\": 2\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/orders/ORD-00001",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders",
+                                "ORD-00001"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"id\": \"ORD-00001\",\n  \"client_id\": 5,\n  \"advisor_id\": 2,\n  \"status\": \"Pendiente\",\n  \"notes\": \"Entregar antes del viernes\",\n  \"total\": \"33750.00\",\n  \"updated_at\": \"2026-04-29T22:34:00.000Z\"\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Reject order (with reason)",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"status\": \"Rechazado\",\n  \"reason\": \"Cantidad excede límite mensual\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/orders/ORD-00001",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders",
+                                "ORD-00001"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":\"ORD-00001\",\"status\":\"Rechazado\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Comments",
+            "item": [
+                {
+                    "name": "Add comment",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"text\": \"Cliente confirmó dirección de entrega.\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/orders/ORD-00001/comments",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders",
+                                "ORD-00001",
+                                "comments"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"id\": 1,\n  \"orderId\": \"ORD-00001\",\n  \"authorId\": 2,\n  \"authorName\": \"Ana Martinez\",\n  \"authorRole\": \"advisor\",\n  \"text\": \"Cliente confirmó dirección de entrega.\",\n  \"createdAt\": \"2026-04-29T22:40:00.000Z\"\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Delete comment",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/orders/ORD-00001/comments/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders",
+                                "ORD-00001",
+                                "comments",
+                                "1"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Comentario eliminado\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Attachments",
+            "item": [
+                {
+                    "name": "Upload attachment",
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "file",
+                                    "type": "file",
+                                    "src": []
+                                },
+                                {
+                                    "key": "type",
+                                    "type": "text",
+                                    "value": "evidence"
+                                }
+                            ]
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/orders/ORD-00001/attachments",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders",
+                                "ORD-00001",
+                                "attachments"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"id\": 2,\n  \"orderId\": \"ORD-00001\",\n  \"name\": \"firma_recibido.png\",\n  \"size\": 31204,\n  \"mimeType\": \"image/png\",\n  \"type\": \"evidence\",\n  \"url\": \"http://localhost:3000/uploads/firma_recibido_1714429501.png\",\n  \"uploadedBy\": \"Repartidor Demo\",\n  \"uploadedAt\": \"2026-04-29T22:45:01.000Z\"\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Get download URL",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/orders/ORD-00001/attachments/1/download",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders",
+                                "ORD-00001",
+                                "attachments",
+                                "1",
+                                "download"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"url\":\"http://localhost:3000/uploads/orden_compra_ORD-00001_1714429421.pdf\"}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Delete attachment",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/orders/ORD-00001/attachments/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "orders",
+                                "ORD-00001",
+                                "attachments",
+                                "1"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Adjunto eliminado\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Price Lists",
+            "item": [
+                {
+                    "name": "List price lists",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/price-lists",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "price-lists"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "[\n  {\"id\": 1, \"name\": \"Lista A\", \"description\": \"Precio publico\", \"multiplier\": \"1.0000\"},\n  {\"id\": 2, \"name\": \"Lista B\", \"description\": \"Precio especial\", \"multiplier\": \"0.9000\"},\n  {\"id\": 3, \"name\": \"Lista C\", \"description\": \"Precio mayorista\", \"multiplier\": \"0.8000\"}\n]"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create price list",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Lista D\",\n  \"description\": \"Precio aliados estratégicos\",\n  \"multiplier\": 0.75\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/price-lists",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "price-lists"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":4,\"name\":\"Lista D\",\"description\":\"Precio aliados estratégicos\",\"multiplier\":\"0.7500\"}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Update price list",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"multiplier\": 0.85\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/price-lists/2",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "price-lists",
+                                "2"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":2,\"name\":\"Lista B\",\"multiplier\":\"0.8500\"}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Delete price list",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/price-lists/4",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "price-lists",
+                                "4"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Lista eliminada\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Companies",
+            "item": [
+                {
+                    "name": "List companies",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/companies?active=true",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "companies"
+                            ],
+                            "query": [
+                                {
+                                    "key": "active",
+                                    "value": "true"
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "elcentro",
+                                    "disabled": true
+                                }
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "[\n  {\n    \"id\": 1,\n    \"name\": \"Papeleria El Centro\",\n    \"nit\": \"900.123.456-7\",\n    \"email\": \"contacto@elcentro.com\",\n    \"phone\": \"601-234-5678\",\n    \"address\": \"Cra 10 # 5-23, Bogota\",\n    \"price_list_id\": 2,\n    \"advisor_id\": 2,\n    \"active\": true,\n    \"sucursales\": [\n      {\"id\": 1, \"name\": \"Sede Principal\", \"city\": \"Bogota\", \"address\": \"Cra 10 # 5-23\", \"advisor_id\": null, \"price_list_id\": null, \"active\": true}\n    ]\n  }\n]"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create company",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Distribuciones Norte S.A.S.\",\n  \"nit\": \"900.999.001-1\",\n  \"email\": \"contacto@norte.co\",\n  \"phone\": \"601-555-1234\",\n  \"address\": \"Cra 7 # 15-30, Bogotá\",\n  \"advisorId\": 2,\n  \"priceListId\": 2,\n  \"active\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/companies",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "companies"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":2,\"name\":\"Distribuciones Norte S.A.S.\",\"nit\":\"900.999.001-1\",\"advisor_id\":2,\"price_list_id\":2,\"active\":true}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Get company",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/companies/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "companies",
+                                "1"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"id\": 1,\n  \"name\": \"Papeleria El Centro\",\n  \"nit\": \"900.123.456-7\",\n  \"price_list_id\": 2,\n  \"advisor_id\": 2,\n  \"active\": true,\n  \"sucursales\": []\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Update company",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"advisorId\": 2,\n  \"priceListId\": 3\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/companies/1",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "companies",
+                                "1"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":1,\"name\":\"Papeleria El Centro\",\"advisor_id\":2,\"price_list_id\":3}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Delete company",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/companies/2",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "companies",
+                                "2"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Empresa eliminada correctamente\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Sucursales",
+            "item": [
+                {
+                    "name": "List sucursales (by company)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/companies/1/sucursales",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "companies",
+                                "1",
+                                "sucursales"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "[\n  {\"id\": 1, \"company_id\": 1, \"name\": \"Sede Principal\", \"city\": \"Bogota\", \"address\": \"Cra 10 # 5-23\", \"advisor_id\": null, \"price_list_id\": null, \"active\": true}\n]"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create sucursal",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Sede Norte\",\n  \"city\": \"Medellín\",\n  \"address\": \"Cra 80 # 33-12\",\n  \"advisorId\": 2,\n  \"priceListId\": 3,\n  \"active\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/companies/1/sucursales",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "companies",
+                                "1",
+                                "sucursales"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":2,\"company_id\":1,\"name\":\"Sede Norte\",\"city\":\"Medellín\",\"advisor_id\":2,\"price_list_id\":3,\"active\":true}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Update sucursal",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"address\": \"Cra 80 # 33-15\",\n  \"advisorId\": null\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/companies/1/sucursales/2",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "companies",
+                                "1",
+                                "sucursales",
+                                "2"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":2,\"name\":\"Sede Norte\",\"address\":\"Cra 80 # 33-15\",\"advisor_id\":null}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Delete sucursal",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/companies/1/sucursales/2",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "companies",
+                                "1",
+                                "sucursales",
+                                "2"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Sucursal eliminada correctamente\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Branches",
+            "item": [
+                {
+                    "name": "List branches",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/branches?active=true",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches"
+                            ],
+                            "query": [
+                                {
+                                    "key": "active",
+                                    "value": "true"
+                                }
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "[\n  {\"id\": 1, \"name\": \"Sede Bogotá\", \"city\": \"Bogotá\", \"address\": \"Cra 30 # 12-45\", \"phone\": \"601-555-0001\", \"active\": true}\n]"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create branch",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Sede Cali\",\n  \"city\": \"Cali\",\n  \"address\": \"Av 6N # 23-100\",\n  \"phone\": \"602-555-0002\",\n  \"active\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/branches",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":2,\"name\":\"Sede Cali\",\"city\":\"Cali\",\"active\":true}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Update branch",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"phone\": \"602-555-0099\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/branches/2",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches",
+                                "2"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":2,\"phone\":\"602-555-0099\"}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Delete branch",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/branches/2",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "branches",
+                                "2"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Sede eliminada\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Categories",
+            "item": [
+                {
+                    "name": "List categories",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/categories?active=true",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "categories"
+                            ],
+                            "query": [
+                                {
+                                    "key": "active",
+                                    "value": "true"
+                                }
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "[\n  {\"id\": 1, \"name\": \"Papel\", \"description\": \"Resmas, pliegos y tipos de papel\", \"active\": true}\n]"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create category",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Tóner\",\n  \"description\": \"Cartuchos y tóner para impresoras\",\n  \"active\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/categories",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "categories"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":6,\"name\":\"Tóner\",\"active\":true}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Update category",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"description\": \"Cartuchos, tóner y refills\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/categories/6",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "categories",
+                                "6"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":6,\"name\":\"Tóner\",\"description\":\"Cartuchos, tóner y refills\"}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Delete category",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/categories/6",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "categories",
+                                "6"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Categoría eliminada\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Users",
+            "item": [
+                {
+                    "name": "List users",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/users?active=true",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users"
+                            ],
+                            "query": [
+                                {
+                                    "key": "role",
+                                    "value": "advisor",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "companyId",
+                                    "value": "1",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "sucursalId",
+                                    "value": "1",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "active",
+                                    "value": "true"
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "ana",
+                                    "disabled": true
+                                }
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "[\n  {\"id\": 2, \"name\": \"Ana Martinez\", \"email\": \"asesor@papeleriacartagena.com\", \"role\": \"advisor\", \"branch_id\": 1, \"initials\": \"AM\", \"active\": true}\n]"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create user (advisor)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Carlos Pérez\",\n  \"email\": \"carlos@papeleriacartagena.com\",\n  \"password\": \"***REMOVED***\",\n  \"role\": \"advisor\",\n  \"branchId\": 1,\n  \"initials\": \"CP\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/users",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":7,\"name\":\"Carlos Pérez\",\"email\":\"carlos@papeleriacartagena.com\",\"role\":\"advisor\",\"branch_id\":1,\"active\":true}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create user (delivery)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Repartidor Demo\",\n  \"email\": \"delivery@papeleriacartagena.com\",\n  \"password\": \"***REMOVED***\",\n  \"role\": \"delivery\",\n  \"branchId\": 1,\n  \"initials\": \"RD\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/users",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":8,\"name\":\"Repartidor Demo\",\"role\":\"delivery\",\"branch_id\":1,\"active\":true}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Create user (client)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"name\": \"Pedidos Norte\",\n  \"email\": \"pedidos@norte.co\",\n  \"password\": \"***REMOVED***\",\n  \"role\": \"client\",\n  \"clientRole\": \"creador_pedidos\",\n  \"companyId\": 1,\n  \"sucursalId\": 1,\n  \"priceListId\": 2,\n  \"initials\": \"PN\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/users",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "201 Created",
+                            "status": "Created",
+                            "code": 201,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":9,\"name\":\"Pedidos Norte\",\"role\":\"client\",\"client_role\":\"creador_pedidos\",\"company_id\":1,\"sucursal_id\":1,\"price_list_id\":2}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Get user",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/users/2",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users",
+                                "2"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":2,\"name\":\"Ana Martinez\",\"role\":\"advisor\",\"branch_id\":1,\"active\":true}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Update user",
+                    "request": {
+                        "method": "PUT",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"phone\": \"300-555-7890\",\n  \"contactName\": \"Ana M.\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/users/2",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users",
+                                "2"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"id\":2,\"name\":\"Ana Martinez\",\"phone\":\"300-555-7890\",\"contact_name\":\"Ana M.\"}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Delete user",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/users/9",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users",
+                                "9"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\"message\":\"Usuario eliminado correctamente\"}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Stats",
+            "item": [
+                {
+                    "name": "Stats admin",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/stats/admin",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "stats",
+                                "admin"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"totalOrders\": 42,\n  \"ordersThisMonth\": 12,\n  \"totalRevenue\": 1850000,\n  \"revenueThisMonth\": 480000,\n  \"pendingOrders\": 5,\n  \"activeClients\": 18,\n  \"activeProducts\": 20,\n  \"ordersByStatus\": {\"Pendiente\": 3, \"Alistamiento\": 1, \"Entregado\": 30},\n  \"revenueByMonth\": [{\"month\": \"2026-04\", \"revenue\": 480000}]\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Stats advisor",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/stats/advisor",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "stats",
+                                "advisor"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"myOrders\": 18,\n  \"myOrdersThisMonth\": 6,\n  \"myRevenue\": 720000,\n  \"pendingForMe\": 2,\n  \"ordersByStatus\": {\"Pendiente\": 1, \"En Ruta\": 1}\n}"
+                        }
+                    ]
+                },
+                {
+                    "name": "Stats client",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/stats/client",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "stats",
+                                "client"
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                }
+                            ],
+                            "body": "{\n  \"scope\": \"company\",\n  \"totalOrders\": 14,\n  \"ordersThisMonth\": 4,\n  \"totalSpent\": 520000,\n  \"spentThisMonth\": 168000,\n  \"ordersByStatus\": {\"Pendiente\": 1, \"Entregado\": 11, \"Rechazado\": 2},\n  \"monthly\": [\n    {\"month\": \"2026-04\", \"orders\": 4, \"revenue\": 168000}\n  ],\n  \"topProducts\": [\n    {\"productId\": 1, \"productName\": \"Resma Papel Bond 75g A4\", \"sku\": \"PAP-001\", \"quantity\": 30, \"revenue\": 337500}\n  ],\n  \"topUsers\": [\n    {\"userId\": 5, \"userName\": \"Creador Pedidos\", \"orders\": 9, \"revenue\": 380000}\n  ]\n}"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "Exports",
+            "item": [
+                {
+                    "name": "Export orders (CSV)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/stats/orders/export?format=csv",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "stats",
+                                "orders",
+                                "export"
+                            ],
+                            "query": [
+                                {
+                                    "key": "format",
+                                    "value": "csv"
+                                },
+                                {
+                                    "key": "status",
+                                    "value": "Entregado",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "dateFrom",
+                                    "value": "2026-04-01",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "dateTo",
+                                    "value": "2026-04-30",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "companyId",
+                                    "value": "1",
+                                    "disabled": true
+                                }
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "text/csv; charset=utf-8"
+                                },
+                                {
+                                    "key": "Content-Disposition",
+                                    "value": "attachment; filename=\"pedidos_2026-04-29.csv\""
+                                }
+                            ],
+                            "body": "ID,Estado,Fecha,Empresa,Sucursal,Cliente,Asesor,Items,Total (COP)\r\nORD-00001,Entregado,2026-04-29,Papeleria El Centro,Sede Principal,Creador Pedidos,Ana Martinez,2,33750"
+                        }
+                    ]
+                },
+                {
+                    "name": "Export orders (XLSX)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": {
+                            "raw": "{{base_url}}/stats/orders/export?format=xlsx",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "stats",
+                                "orders",
+                                "export"
+                            ],
+                            "query": [
+                                {
+                                    "key": "format",
+                                    "value": "xlsx"
+                                },
+                                {
+                                    "key": "status",
+                                    "value": "Entregado",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "dateFrom",
+                                    "value": "2026-04-01",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "dateTo",
+                                    "value": "2026-04-30",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "companyId",
+                                    "value": "1",
+                                    "disabled": true
+                                }
+                            ]
+                        }
+                    },
+                    "response": [
+                        {
+                            "name": "200 OK",
+                            "status": "OK",
+                            "code": 200,
+                            "header": [
+                                {
+                                    "key": "Content-Type",
+                                    "value": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                },
+                                {
+                                    "key": "Content-Disposition",
+                                    "value": "attachment; filename=\"pedidos_2026-04-29.xlsx\""
+                                }
+                            ],
+                            "body": "<binary XLSX content>"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

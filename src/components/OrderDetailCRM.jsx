@@ -177,6 +177,42 @@ export default function OrderDetailCRM({
     setLocalAttachments(prev => prev.filter(a => a.id !== attId));
   }
 
+  // PHASE 7: el PDF de orden de compra existe como adjunto type='purchase_order'
+  // a partir del momento en que el pedido se aprueba.
+  const purchaseOrderPdf = (localAttachments || []).find(a => a.type === 'purchase_order');
+
+  function handleOpenPurchaseOrder() {
+    if (!purchaseOrderPdf) return;
+    const url = purchaseOrderPdf.fileUrl || purchaseOrderPdf.url;
+    if (url) window.open(url, '_blank', 'noopener');
+  }
+
+  // Excel detallado del pedido
+  const [exporting, setExporting] = useState(false);
+  async function handleExportXlsx() {
+    setExporting(true);
+    try {
+      const baseUrl = (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/$/, '');
+      const token   = localStorage.getItem('pc_token');
+      const res = await fetch(`${baseUrl}/orders/${order.id}/export.xlsx`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${order.id}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      alert(err?.message || 'No se pudo exportar el pedido');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -194,20 +230,26 @@ export default function OrderDetailCRM({
 
         <div className="flex items-center gap-2">
           <button
-            disabled
-            title="Próximamente"
-            className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 bg-red-50 rounded-lg text-sm font-medium opacity-70 cursor-not-allowed select-none"
+            onClick={handleOpenPurchaseOrder}
+            disabled={!purchaseOrderPdf}
+            title={purchaseOrderPdf ? 'Abrir orden de compra' : 'Disponible cuando el pedido se apruebe'}
+            className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition ${
+              purchaseOrderPdf
+                ? 'border-red-200 text-red-700 bg-red-50 hover:bg-red-100 hover:border-red-300'
+                : 'border-red-100 text-red-300 bg-red-50 opacity-60 cursor-not-allowed select-none'
+            }`}
           >
             <FileDown className="w-4 h-4" />
             Orden de compra PDF
           </button>
           <button
-            disabled
-            title="Próximamente"
-            className="flex items-center gap-2 px-4 py-2 border border-emerald-200 text-emerald-700 bg-emerald-50 rounded-lg text-sm font-medium opacity-70 cursor-not-allowed select-none"
+            onClick={handleExportXlsx}
+            disabled={exporting}
+            title="Descargar Excel del pedido"
+            className="flex items-center gap-2 px-4 py-2 border border-emerald-200 text-emerald-700 bg-emerald-50 rounded-lg text-sm font-medium hover:bg-emerald-100 hover:border-emerald-300 disabled:opacity-50 disabled:cursor-wait transition"
           >
             <Sheet className="w-4 h-4" />
-            Plantilla Excel
+            {exporting ? 'Generando...' : 'Plantilla Excel'}
           </button>
         </div>
       </div>

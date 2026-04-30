@@ -26,8 +26,9 @@ function formatDate(d) {
   });
 }
 
-// Carga toda la data necesaria para el PDF en una sola pasada.
-async function loadOrderContext(orderId, db = pool) {
+// Carga toda la data necesaria para el PDF/Excel en una sola pasada.
+// Exportada para que otros generadores (Excel detallado) reusen la query.
+export async function loadOrderContext(orderId, db = pool) {
   const { rows: orderRows } = await db.query(
     `SELECT o.*,
             uc.name        AS client_name,

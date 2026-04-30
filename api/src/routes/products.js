@@ -19,16 +19,16 @@ async function resolveListForRequest(req) {
 // GET /products
 router.get('/', async (req, res) => {
   const { categoryId, active, search, page = 1, limit = 20 } = req.query;
-  const pageNum  = Math.max(1, parseInt(page));
+  const pageNum = Math.max(1, parseInt(page));
   const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
-  const offset   = (pageNum - 1) * limitNum;
+  const offset = (pageNum - 1) * limitNum;
 
   // condParams indexa desde $1 y se reutiliza igual en la count query.
   // multiplier, limit y offset se appenden al final para no desplazar los índices WHERE.
   const condParams = [];
   const conditions = ['p.active = true'];
 
-  if (active !== undefined)  conditions[0] = `p.active = $${condParams.push(active === 'true')}`;
+  if (active !== undefined) conditions[0] = `p.active = $${condParams.push(active === 'true')}`;
   if (categoryId) conditions.push(`p.category_id = $${condParams.push(parseInt(categoryId))}`);
   if (search) {
     const s = '%' + search + '%';
@@ -45,8 +45,8 @@ router.get('/', async (req, res) => {
     const priceListId = await resolveListForRequest(req);
 
     // Params order: [...condParams, priceListId, limitNum, offset]
-    const listIdx   = condParams.length + 1;
-    const limitIdx  = condParams.length + 2;
+    const listIdx = condParams.length + 1;
+    const limitIdx = condParams.length + 2;
     const offsetIdx = condParams.length + 3;
     const mainParams = [...condParams, priceListId, limitNum, offset];
 
@@ -80,10 +80,10 @@ router.get('/', async (req, res) => {
     );
 
     return res.json({
-      data:        rows,
-      total:       parseInt(countRows[0].count),
-      page:        pageNum,
-      limit:       limitNum,
+      data: rows,
+      total: parseInt(countRows[0].count),
+      page: pageNum,
+      limit: limitNum,
       priceListId,
     });
   } catch (err) {
@@ -136,8 +136,8 @@ router.get('/:id', async (req, res) => {
 // POST /products
 router.post('/', requireRole('admin'), async (req, res) => {
   const { name, sku, categoryId, description, basePrice, stock = 0, unit, active = true, complementaryIds = [] } = req.body;
-  if (!name || !sku || !categoryId || basePrice === undefined || !unit) {
-    return res.status(422).json({ error: 'name, sku, categoryId, basePrice y unit son requeridos' });
+  if (!name || !sku || !categoryId || typeof basePrice !== 'number' || basePrice < 0 || !unit) {
+    return res.status(422).json({ error: 'name, sku, categoryId, basePrice (válido y >= 0) y unit son requeridos' });
   }
   const client = await pool.connect();
   try {
@@ -187,13 +187,13 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
 
     const fields = [];
     const params = [];
-    if (name        !== undefined) fields.push(`name        = $${params.push(name)}`);
-    if (categoryId  !== undefined) fields.push(`category_id = $${params.push(categoryId)}`);
+    if (name !== undefined) fields.push(`name        = $${params.push(name)}`);
+    if (categoryId !== undefined) fields.push(`category_id = $${params.push(categoryId)}`);
     if (description !== undefined) fields.push(`description = $${params.push(description)}`);
-    if (basePrice   !== undefined) fields.push(`base_price  = $${params.push(basePrice)}`);
-    if (stock       !== undefined) fields.push(`stock       = $${params.push(stock)}`);
-    if (unit        !== undefined) fields.push(`unit        = $${params.push(unit)}`);
-    if (active      !== undefined) fields.push(`active      = $${params.push(active)}`);
+    if (basePrice !== undefined) fields.push(`base_price  = $${params.push(basePrice)}`);
+    if (stock !== undefined) fields.push(`stock       = $${params.push(stock)}`);
+    if (unit !== undefined) fields.push(`unit        = $${params.push(unit)}`);
+    if (active !== undefined) fields.push(`active      = $${params.push(active)}`);
 
     if (fields.length) {
       params.push(id);

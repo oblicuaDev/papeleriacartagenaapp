@@ -290,20 +290,30 @@ export default function AdminProducts() {
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
       try {
-        // Llama a tu API pasando los parámetros de búsqueda.
-        // Asegúrate de que productsApi.getAll (o el método que uses) acepte y envíe estos query params.
-        const response = await productsApi.list({
-          search: search || undefined,
-          categoryId: filterCategory || undefined,
-          limit: 100, // Opcional, puedes aumentarlo si lo deseas
-        });
+        // Construimos un objeto de parámetros limpio
+        const params = {
+          limit: 100,
+        };
 
-        // Actualizamos el estado global con los resultados que devolvió el backend
+        // Solo agregamos 'search' si tiene texto
+        if (search && search.trim() !== "") {
+          params.search = search;
+        }
+
+        // Solo agregamos 'categoryId' si se seleccionó una (diferente de vacío)
+        if (filterCategory && filterCategory !== "") {
+          params.categoryId = filterCategory;
+        }
+
+        // Llamamos a la API solo con los parámetros que existen
+        const response = await productsApi.list(params);
+
+        // Actualizamos el estado global
         setProducts(response.data || response);
       } catch (err) {
         console.error("Error al buscar en la API:", err);
       }
-    }, 500); // Espera 500ms antes de disparar la búsqueda
+    }, 500);
 
     return () => clearTimeout(delayDebounceFn);
   }, [search, filterCategory, setProducts]);

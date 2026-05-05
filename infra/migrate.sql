@@ -87,12 +87,12 @@ CREATE TABLE IF NOT EXISTS users (
         CHECK (role IN ('admin', 'advisor', 'client', 'delivery')),
     CONSTRAINT chk_client_role
         CHECK (
-            (role = 'client' AND client_role IN ('supervisor', 'creador_pedidos'))
+            (role = 'client' AND client_role IN ('supervisor', 'creador_pedidos', 'admin_empresa'))
             OR (role <> 'client' AND client_role IS NULL)
         ),
     CONSTRAINT chk_client_fields
         CHECK (
-            (role = 'client' AND company_id IS NOT NULL AND sucursal_id IS NOT NULL AND price_list_id IS NOT NULL)
+            (role = 'client' AND company_id IS NOT NULL AND sucursal_id IS NOT NULL)
             OR role <> 'client'
         ),
     CONSTRAINT chk_branch_required
@@ -151,15 +151,18 @@ CREATE TABLE IF NOT EXISTS product_complementaries (
 -- 9. orders — Pedidos
 -- ----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS orders (
-    id         VARCHAR(20)    PRIMARY KEY,
-    client_id  INTEGER        NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    advisor_id INTEGER        REFERENCES users(id) ON DELETE SET NULL,
-    status     VARCHAR(50)    NOT NULL,
-    notes      TEXT,
-    carrier    VARCHAR(100),
-    total      NUMERIC(14, 2) NOT NULL,
-    created_at TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+    id           VARCHAR(20)    PRIMARY KEY,
+    client_id    INTEGER        NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    advisor_id   INTEGER        REFERENCES users(id) ON DELETE SET NULL,
+    delivery_id  INTEGER        REFERENCES users(id) ON DELETE SET NULL,
+    delivered_by INTEGER        REFERENCES users(id) ON DELETE SET NULL,
+    delivered_at TIMESTAMPTZ,
+    status       VARCHAR(50)    NOT NULL,
+    notes        TEXT,
+    carrier      VARCHAR(100),
+    total        NUMERIC(14, 2) NOT NULL,
+    created_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_order_status CHECK (
         status IN (
             'Pendiente por aprobar',
@@ -336,6 +339,8 @@ CREATE INDEX IF NOT EXISTS idx_products_sku             ON products(sku);
 CREATE INDEX IF NOT EXISTS idx_products_active          ON products(active);
 CREATE INDEX IF NOT EXISTS idx_orders_client            ON orders(client_id);
 CREATE INDEX IF NOT EXISTS idx_orders_advisor           ON orders(advisor_id);
+CREATE INDEX IF NOT EXISTS idx_orders_delivery          ON orders(delivery_id);
+CREATE INDEX IF NOT EXISTS idx_orders_delivered_at      ON orders(delivered_at);
 CREATE INDEX IF NOT EXISTS idx_orders_status            ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at        ON orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_order_items_order        ON order_items(order_id);

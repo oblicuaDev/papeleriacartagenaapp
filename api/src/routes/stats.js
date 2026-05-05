@@ -10,7 +10,7 @@ router.use(requireAuth);
 // Devuelve { conditions, params } para componer en queries posteriores.
 // Lanza un Error con .status para errores de autorizacion.
 function buildScopeFilter(req) {
-  const { role, id, companyId, clientRole } = req.user;
+  const { role, id, companyId, clientRole, sucursalId } = req.user;
   const { dateFrom, dateTo, status, companyId: qCompanyId } = req.query;
 
   const params = [];
@@ -23,6 +23,11 @@ function buildScopeFilter(req) {
   } else if (role === 'client' && clientRole === 'creador_pedidos') {
     conds.push(`o.client_id = $${params.push(id)}`);
   } else if (role === 'client' && clientRole === 'supervisor') {
+    // PHASE 3: supervisor solo ve su sucursal
+    conds.push(`uc.company_id = $${params.push(companyId)}`);
+    conds.push(`uc.sucursal_id = $${params.push(sucursalId ?? null)}`);
+  } else if (role === 'client' && clientRole === 'admin_empresa') {
+    // PHASE 3: admin_empresa ve toda su empresa
     conds.push(`uc.company_id = $${params.push(companyId)}`);
   } else {
     const e = new Error('No autorizado');
@@ -143,13 +148,27 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
 //   - supervisor: stats agregadas de toda la empresa
 //   - creador_pedidos: stats de sus propios pedidos
 router.get('/client', requireRole('client'), async (req, res) => {
-  const { id: myId, companyId, clientRole } = req.user;
+  const { id: myId, companyId, clientRole, sucursalId } = req.user;
 
-  const isSupervisor = clientRole === 'supervisor';
-  const params = [isSupervisor ? companyId : myId];
-  const where = isSupervisor
-    ? `uc.company_id = $1`
-    : `o.client_id = $1`;
+  // PHASE 3:
+  //   creador_pedidos: ve sus propios pedidos
+  //   supervisor:      ve los pedidos de su sucursal
+  //   admin_empresa:   ve los pedidos de toda la empresa
+  const isCompanyWide = clientRole === 'admin_empresa';
+  const isSupervisor  = clientRole === 'supervisor';
+
+  let where;
+  let params;
+  if (isCompanyWide) {
+    where  = `uc.company_id = $1`;
+    params = [companyId];
+  } else if (isSupervisor) {
+    where  = `uc.company_id = $1 AND uc.sucursal_id = $2`;
+    params = [companyId, sucursalId ?? null];
+  } else {
+    where  = `o.client_id = $1`;
+    params = [myId];
+  }
   const fromJoin = `FROM orders o JOIN users uc ON uc.id = o.client_id`;
 
   try {
@@ -204,14 +223,14 @@ router.get('/client', requireRole('client'), async (req, res) => {
          LIMIT 10`,
         params
       ),
-      // Solo relevante para supervisor: quien pide mas en su empresa
-      isSupervisor
+      // Top users solo es relevante en vistas agregadas (supervisor / admin_empresa).
+      (isSupervisor || isCompanyWide)
         ? pool.query(
             `SELECT uc.id AS user_id, uc.name AS user_name,
                     COUNT(*)::int AS orders,
                     COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS revenue
              ${fromJoin}
-             WHERE uc.company_id = $1
+             WHERE ${where}
              GROUP BY uc.id, uc.name
              ORDER BY orders DESC
              LIMIT 10`,
@@ -224,7 +243,7 @@ router.get('/client', requireRole('client'), async (req, res) => {
     for (const row of statusRows) ordersByStatus[row.status] = parseInt(row.count);
 
     return res.json({
-      scope: isSupervisor ? 'company' : 'self',
+      scope: isCompanyWide ? 'company' : isSupervisor ? 'sucursal' : 'self',
       totalOrders:      parseInt(totalRows[0].total),
       ordersThisMonth:  parseInt(monthRows[0].total),
       totalSpent:       parseFloat(totalRows[0].revenue),

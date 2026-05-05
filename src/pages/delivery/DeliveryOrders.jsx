@@ -159,15 +159,26 @@ export default function DeliveryOrders() {
                 )}
 
                 {tab === 'En Ruta' && (
-                  <div className="border-t border-gray-100 bg-gray-50 px-5 py-3 flex items-center justify-end">
-                    <button
-                      onClick={() => handleAdvance(order, 'Entregado')}
-                      disabled={updating === order.id}
-                      className="flex items-center gap-1.5 px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Marcar entregado
-                    </button>
+                  <div className="border-t border-gray-100 bg-gray-50 px-5 py-3 flex items-center justify-between gap-3">
+                    <span className="text-xs text-gray-500">
+                      Sube la evidencia desde el detalle del pedido antes de marcar como entregado.
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => navigate(`/entregas/pedido/${order.id}`)}
+                        className="px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-100 transition"
+                      >
+                        Subir evidencia
+                      </button>
+                      <button
+                        onClick={() => handleAdvance(order, 'Entregado')}
+                        disabled={updating === order.id}
+                        className="flex items-center gap-1.5 px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Marcar entregado
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

@@ -58,12 +58,22 @@ router.get('/', async (req, res) => {
   } else if (role === 'client' && clientRole === 'creador_pedidos') {
     conditions.push(`o.client_id = $${params.push(myId)}`);
   } else if (role === 'client' && clientRole === 'supervisor') {
-    // Ve todos los pedidos de su empresa
+    // PHASE 3: supervisor solo ve pedidos de su sucursal
+    conditions.push(
+      `o.client_id IN (
+         SELECT u.id FROM users u
+         WHERE u.company_id = $${params.push(companyId)}
+           AND u.sucursal_id = $${params.push(req.user.sucursalId ?? null)}
+       )`
+    );
+  } else if (role === 'client' && clientRole === 'admin_empresa') {
+    // PHASE 3: admin_empresa ve pedidos de TODAS las sucursales de su empresa
     conditions.push(
       `o.client_id IN (SELECT id FROM users WHERE company_id = $${params.push(companyId)})`
     );
   } else if (role === 'delivery') {
-    // PHASE 5: delivery solo ve pedidos en estados operativos
+    // PHASE 5: delivery solo ve pedidos asignados a él en estados operativos
+    conditions.push(`o.delivery_id = $${params.push(myId)}`);
     conditions.push(
       `o.status = ANY($${params.push(DELIVERY_VISIBLE_STATUSES)}::varchar[])`
     );
@@ -125,15 +135,24 @@ router.get('/', async (req, res) => {
 
 // Helper: ACL compartida para GET /:id y GET /:id/timeline
 async function canViewOrder(req, order) {
-  const { role, id: myId, companyId } = req.user;
+  const { role, id: myId, companyId, clientRole, sucursalId } = req.user;
   if (role === 'admin') return true;
   if (role === 'advisor') return order.advisor_id === myId;
-  if (role === 'delivery') return DELIVERY_VISIBLE_STATUSES.includes(order.status);
+  if (role === 'delivery') {
+    return order.delivery_id === myId &&
+           DELIVERY_VISIBLE_STATUSES.includes(order.status);
+  }
   if (role === 'client') {
     const { rows } = await pool.query(
-      `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
+      `SELECT company_id, sucursal_id FROM users WHERE id = $1`, [order.client_id]
     );
-    return rows[0]?.company_id === companyId;
+    if (!rows[0] || rows[0].company_id !== companyId) return false;
+    // PHASE 3: supervisor solo ve pedidos de su sucursal;
+    // admin_empresa y creador_pedidos ven toda la empresa.
+    if (clientRole === 'supervisor') {
+      return rows[0].sucursal_id === sucursalId;
+    }
+    return true;
   }
   return false;
 }
@@ -246,7 +265,6 @@ router.get('/:id/timeline', async (req, res) => {
 
 // GET /orders/:id
 router.get('/:id', async (req, res) => {
-  const { role, id: myId, companyId } = req.user;
   const orderId = req.params.id.toUpperCase();
 
   try {
@@ -254,29 +272,23 @@ router.get('/:id', async (req, res) => {
       `SELECT o.*,
          uc.name AS client_name,
          uc.company_id,
-         ua.name AS advisor_name
+         uc.sucursal_id AS client_sucursal_id,
+         ua.name AS advisor_name,
+         ud.name AS delivery_name,
+         udb.name AS delivered_by_name
        FROM orders o
        JOIN users uc ON uc.id = o.client_id
-       LEFT JOIN users ua ON ua.id = o.advisor_id
+       LEFT JOIN users ua  ON ua.id  = o.advisor_id
+       LEFT JOIN users ud  ON ud.id  = o.delivery_id
+       LEFT JOIN users udb ON udb.id = o.delivered_by
        WHERE o.id = $1`,
       [orderId]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
     const order = rows[0];
 
-    // Control de acceso
-    if (role === 'advisor' && order.advisor_id !== myId) {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-    if (role === 'client') {
-      const { rows: userRows } = await pool.query(
-        `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
-      );
-      if (userRows[0]?.company_id !== companyId) {
-        return res.status(403).json({ error: 'No autorizado' });
-      }
-    }
-    if (role === 'delivery' && !DELIVERY_VISIBLE_STATUSES.includes(order.status)) {
+    // Control de acceso unificado
+    if (!(await canViewOrder(req, order))) {
       return res.status(403).json({ error: 'No autorizado' });
     }
 
@@ -318,6 +330,12 @@ router.get('/:id', async (req, res) => {
 //   - Cliente NUNCA dicta el precio almacenado
 router.post('/', requireRole('client'), async (req, res) => {
   const { id: clientId, clientRole, companyId } = req.user;
+
+  // PHASE 3: admin_empresa es READ-ONLY (no crea pedidos)
+  if (clientRole === 'admin_empresa') {
+    return res.status(403).json({ error: 'admin_empresa no puede crear pedidos' });
+  }
+
   const { items } = req.body;
   let { notes } = req.body;
 
@@ -489,10 +507,10 @@ router.post('/', requireRole('client'), async (req, res) => {
 //   - Log de cambio de estado en order_status_log.
 //   - 'Rechazado' requiere campo `reason`.
 router.put('/:id', async (req, res) => {
-  const { role, id: myId, companyId } = req.user;
+  const { role, id: myId, companyId, sucursalId } = req.user;
   const clientRole = req.user.clientRole;
   const orderId = req.params.id.toUpperCase();
-  const { status, carrier, advisorId, reason } = req.body;
+  const { status, carrier, advisorId, deliveryId, reason } = req.body;
 
   // Sanidad temprana antes de abrir transaccion
   if (status === 'Rechazado' && (!reason || !reason.trim())) {
@@ -537,10 +555,38 @@ router.put('/:id', async (req, res) => {
           await client.query('ROLLBACK');
           return res.status(403).json({ error: 'No autorizado para aprobar pedidos de otra empresa' });
         }
+        // PHASE 3: supervisor solo aprueba pedidos de su sucursal
+        const { rows: clientUser } = await client.query(
+          `SELECT sucursal_id FROM users WHERE id = $1`, [order.client_id]
+        );
+        if (clientUser[0]?.sucursal_id !== sucursalId) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Pedido pertenece a otra sucursal' });
+        }
         allowedTransitions = VALID_TRANSITIONS.supervisor[order.status] || [];
       } else if (role === 'delivery') {
-        // PHASE 5: delivery solo opera transiciones de transporte
+        // PHASE 5: delivery solo opera transiciones de transporte y solo en sus pedidos
+        if (order.delivery_id !== myId) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Pedido no asignado a este repartidor' });
+        }
         allowedTransitions = VALID_TRANSITIONS.delivery[order.status] || [];
+
+        // PHASE 4: el repartidor no puede marcar Entregado sin subir al menos
+        // una evidencia (foto, firma, documento). Bloqueo temprano para mensaje claro.
+        if (status === 'Entregado') {
+          const { rows: ev } = await client.query(
+            `SELECT 1 FROM order_attachments
+             WHERE order_id = $1 AND type = 'evidence' LIMIT 1`,
+            [orderId]
+          );
+          if (!ev[0]) {
+            await client.query('ROLLBACK');
+            return res.status(422).json({
+              error: 'Sube al menos una evidencia (foto, firma o documento) antes de marcar como entregado',
+            });
+          }
+        }
       } else {
         await client.query('ROLLBACK');
         return res.status(403).json({ error: 'No autorizado para cambiar este estado' });
@@ -561,6 +607,30 @@ router.put('/:id', async (req, res) => {
     if (status   !== undefined) fields.push(`status    = $${params.push(status)}`);
     if (carrier  !== undefined) fields.push(`carrier   = $${params.push(carrier)}`);
     if (advisorId !== undefined && role === 'admin') fields.push(`advisor_id = $${params.push(advisorId)}`);
+
+    // PHASE 4: persistir quién entregó y cuándo en columnas dedicadas.
+    if (statusChanges && status === 'Entregado') {
+      fields.push(`delivered_by = $${params.push(myId)}`);
+      fields.push(`delivered_at = NOW()`);
+    }
+
+    // PHASE 3: admin/advisor pueden asignar repartidor.
+    // El backend valida que sea un usuario active con role=delivery (o null para desasignar).
+    if (deliveryId !== undefined && (role === 'admin' || role === 'advisor')) {
+      if (deliveryId === null) {
+        fields.push(`delivery_id = NULL`);
+      } else {
+        const { rows: dRows } = await client.query(
+          `SELECT id FROM users WHERE id = $1 AND role = 'delivery' AND active = true`,
+          [deliveryId]
+        );
+        if (!dRows[0]) {
+          await client.query('ROLLBACK');
+          return res.status(422).json({ error: 'deliveryId invalido' });
+        }
+        fields.push(`delivery_id = $${params.push(deliveryId)}`);
+      }
+    }
 
     // Auto-asignar advisor en su primer toque (solo si no estaba asignado)
     if (role === 'advisor' && !order.advisor_id) {

@@ -5,7 +5,8 @@
  *   order        – order object (with comments[], attachments[])
  *   onBack       – fn() navigate back
  *   editable     – bool: can change status / add comments / upload attachments
- *   canAssign    – bool (admin only): can assign advisor
+ *   canAssign         – bool (admin only): can assign advisor
+ *   canAssignDelivery – bool (admin/advisor): can assign delivery
  *   currentUser  – logged-in user object
  *   users        – full users array (from AuthContext)
  *   updateOrder  – fn(orderId, updates) from AppContext
@@ -125,10 +126,13 @@ export default function OrderDetailCRM({
   onBack,
   editable = false,
   canAssign = false,
+  canAssignDelivery = false,
   currentUser,
   users = [],
   updateOrder,
 }) {
+  // Si canAssign es true, también puede asignar repartidor.
+  const showDeliveryAssign = canAssign || canAssignDelivery;
   const [status, setStatus] = useState(order.status);
   const [carrier, setCarrier] = useState(order.carrier || "");
   const [saved, setSaved] = useState(false);
@@ -157,7 +161,8 @@ export default function OrderDetailCRM({
       ];
 
   const { products } = useApp();
-  const advisors = users.filter((u) => u.role === "advisor");
+  const advisors  = users.filter((u) => u.role === "advisor"  && u.active);
+  const deliverers = users.filter((u) => u.role === "delivery" && u.active);
 
   // PHASE 6: timeline cronologica del pedido
   const [timeline, setTimeline] = useState(null);
@@ -194,12 +199,33 @@ export default function OrderDetailCRM({
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
+  const evidenceCount = (localAttachments || []).filter(
+    (a) => a.type === "evidence",
+  ).length;
+
+  // PHASE 4: el repartidor no puede marcar Entregado sin evidencia.
+  const deliveryNeedsEvidence =
+    isDelivery && status === "Entregado" && evidenceCount === 0;
+
+  const [saveError, setSaveError] = useState(null);
+
   async function handleSave() {
+    setSaveError(null);
+    if (deliveryNeedsEvidence) {
+      setSaveError(
+        "Sube al menos una evidencia (foto, firma o documento) antes de marcar como entregado.",
+      );
+      return;
+    }
     const updates = { status };
     if (status === "En Ruta") updates.carrier = carrier;
-    await updateOrder(order.id, updates);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    try {
+      await updateOrder(order.id, updates);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setSaveError(err?.message || "No se pudo guardar el cambio");
+    }
   }
 
   async function handleAddComment() {
@@ -385,6 +411,28 @@ export default function OrderDetailCRM({
                       </span>
                     </p>
                   )}
+                  {order.deliveryName && (
+                    <p className="flex items-center gap-1.5">
+                      <Truck className="w-3.5 h-3.5" />
+                      Repartidor:{" "}
+                      <span className="font-medium text-gray-700">
+                        {order.deliveryName}
+                      </span>
+                    </p>
+                  )}
+                  {order.deliveredAt && (
+                    <p className="flex items-center gap-1.5 text-emerald-700">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Entregado por{" "}
+                      <span className="font-medium">
+                        {order.deliveredByName || "—"}
+                      </span>{" "}
+                      el{" "}
+                      <span className="font-medium">
+                        {formatDateTime(order.deliveredAt)}
+                      </span>
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="text-right">
@@ -474,11 +522,54 @@ export default function OrderDetailCRM({
                 </div>
               )}
 
+              {/* Assign delivery — admin/advisor */}
+              {showDeliveryAssign && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-1.5">
+                    <Truck className="w-3.5 h-3.5" />
+                    Repartidor asignado
+                  </label>
+                  <select
+                    value={order.deliveryId || ""}
+                    onChange={(e) =>
+                      updateOrder(order.id, {
+                        deliveryId: e.target.value ? Number(e.target.value) : null,
+                      })
+                    }
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Sin asignar</option>
+                    {deliverers.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Solo el repartidor asignado puede actualizar el estado de entrega.
+                  </p>
+                </div>
+              )}
+
+              {/* Aviso si delivery va a marcar Entregado sin evidencia */}
+              {deliveryNeedsEvidence && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-xs">
+                  Sube al menos una evidencia (foto, firma o documento) antes de marcar el pedido como
+                  <span className="font-semibold"> Entregado</span>.
+                </div>
+              )}
+              {saveError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-xs">
+                  {saveError}
+                </div>
+              )}
+
               {/* Save button */}
               <div className="flex items-center gap-4 pt-1">
                 <button
                   onClick={handleSave}
-                  className="flex items-center gap-2 px-5 py-2 bg-blue-700 text-white rounded-lg text-sm font-semibold hover:bg-blue-800 transition shadow-sm"
+                  disabled={deliveryNeedsEvidence}
+                  className="flex items-center gap-2 px-5 py-2 bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-sm font-semibold hover:bg-blue-800 transition shadow-sm"
                 >
                   <Save className="w-4 h-4" />
                   Guardar cambios

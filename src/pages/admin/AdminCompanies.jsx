@@ -19,7 +19,7 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-const EMPTY_COMPANY  = { name: '', nit: '', email: '', phone: '', address: '', advisorId: '', priceListId: '' };
+const EMPTY_COMPANY  = { name: '', nit: '', email: '', phone: '', address: '', advisorId: '' };
 const EMPTY_SUCURSAL = { name: '', address: '', city: '', advisorId: '', priceListId: '' };
 
 // Convierte "" -> null para selects opcionales (deja undefined fuera de payload)
@@ -53,27 +53,27 @@ export default function AdminCompanies() {
   function openEditCompany(company) {
     setEditingCompany(company);
     setCompanyForm({
-      name:        company.name        || '',
-      nit:         company.nit         || '',
-      email:       company.email       || '',
-      phone:       company.phone       || '',
-      address:     company.address     || '',
-      advisorId:   company.advisorId   ?? '',
-      priceListId: company.priceListId ?? '',
+      name:      company.name      || '',
+      nit:       company.nit       || '',
+      email:     company.email     || '',
+      phone:     company.phone     || '',
+      address:   company.address   || '',
+      advisorId: company.advisorId ?? '',
     });
     setShowCompanyModal(true);
   }
 
+  // PHASE 6: la creación/edición de empresa NO maneja precios.
+  // Las listas de precios se asignan a las empresas desde "Listas de precios".
   async function handleSaveCompany() {
     if (!companyForm.name) return;
     const payload = {
-      name:        companyForm.name,
-      nit:         companyForm.nit         || null,
-      email:       companyForm.email       || null,
-      phone:       companyForm.phone       || null,
-      address:     companyForm.address     || null,
-      advisorId:   nullable(companyForm.advisorId),
-      priceListId: nullable(companyForm.priceListId),
+      name:      companyForm.name,
+      nit:       companyForm.nit     || null,
+      email:     companyForm.email   || null,
+      phone:     companyForm.phone   || null,
+      address:   companyForm.address || null,
+      advisorId: nullable(companyForm.advisorId),
     };
     if (editingCompany) {
       await companiesApi.update(editingCompany.id, payload);
@@ -330,34 +330,24 @@ export default function AdminCompanies() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className={labelClass}>Asesor asignado</label>
-                <select
-                  className={inputClass}
-                  value={companyForm.advisorId}
-                  onChange={e => setCompanyForm(f => ({ ...f, advisorId: e.target.value }))}
-                >
-                  <option value="">— Sin asignar —</option>
-                  {advisors.map(a => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-400 mt-1">Se asigna automáticamente a sus pedidos.</p>
-              </div>
-              <div>
-                <label className={labelClass}>Lista de precios</label>
-                <select
-                  className={inputClass}
-                  value={companyForm.priceListId}
-                  onChange={e => setCompanyForm(f => ({ ...f, priceListId: e.target.value }))}
-                >
-                  <option value="">— Sin lista —</option>
-                  {(priceLists || []).map(pl => (
-                    <option key={pl.id} value={pl.id}>{pl.name}</option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <label className={labelClass}>Asesor asignado</label>
+              <select
+                className={inputClass}
+                value={companyForm.advisorId}
+                onChange={e => setCompanyForm(f => ({ ...f, advisorId: e.target.value }))}
+              >
+                <option value="">— Sin asignar —</option>
+                {advisors.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">Se asigna automáticamente a sus pedidos.</p>
+            </div>
+
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500">
+              La lista de precios se asigna desde el módulo <span className="font-semibold text-gray-700">Listas de precios</span>,
+              no aquí. Una empresa puede pertenecer a una lista a la vez.
             </div>
 
             <div className="flex gap-3 pt-2">

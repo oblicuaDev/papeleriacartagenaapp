@@ -39,6 +39,8 @@ router.post('/login', async (req, res) => {
       role:       user.role,
       clientRole: user.client_role,
       companyId:  user.company_id,
+      sucursalId: user.sucursal_id,
+      branchId:   user.branch_id,
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {

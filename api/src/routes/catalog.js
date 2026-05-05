@@ -15,19 +15,17 @@ router.get('/', async (req, res) => {
   const offset   = (pageNum - 1) * limitNum;
 
   try {
-    // Lista aplicable: company.price_list_id > user.price_list_id
+    // Lista aplicable: sucursal > company > user. Si no hay lista, usamos base_price.
     const priceListId = await resolvePriceListId({ companyId, userId });
-    if (!priceListId) {
-      return res.status(422).json({
-        error: 'No hay lista de precios asignada (ni a la empresa ni al usuario)',
-      });
-    }
 
-    const { rows: plRows } = await pool.query(
-      `SELECT name FROM price_lists WHERE id = $1`,
-      [priceListId]
-    );
-    const priceListName = plRows[0]?.name ?? null;
+    let priceListName = null;
+    if (priceListId) {
+      const { rows: plRows } = await pool.query(
+        `SELECT name FROM price_lists WHERE id = $1`,
+        [priceListId]
+      );
+      priceListName = plRows[0]?.name ?? null;
+    }
 
     // params: [priceListId, ...condParams, limit, offset]
     const params = [priceListId];

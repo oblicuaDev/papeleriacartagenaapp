@@ -110,6 +110,10 @@ export const priceListsApi = {
   create: (data)     => post('/price-lists', data),
   update: (id, data) => put(`/price-lists/${id}`, data),
   remove: (id)       => del(`/price-lists/${id}`),
+  items:        (id)            => get(`/price-lists/${id}/items`),
+  saveItems:    (id, items)     => put(`/price-lists/${id}/items`, { items }),
+  companies:    (id)            => get(`/price-lists/${id}/companies`),
+  setCompanies: (id, companyIds) => put(`/price-lists/${id}/companies`, { companyIds }),
 };
 
 // ── Products ────────────────────────────────────────────────
@@ -119,6 +123,12 @@ export const productsApi = {
   create: (data)        => post('/products', data),
   update: (id, data)    => put(`/products/${id}`, data),
   remove: (id)          => del(`/products/${id}`),
+  uploadImage: (id, file) => {
+    const fd = new FormData();
+    fd.append('image', file);
+    return postForm(`/products/${id}/image`, fd);
+  },
+  removeImage: (id)     => del(`/products/${id}/image`),
 };
 
 // ── Catalog (clientes) ──────────────────────────────────────

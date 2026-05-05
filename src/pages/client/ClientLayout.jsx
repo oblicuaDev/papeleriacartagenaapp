@@ -10,12 +10,22 @@ export default function ClientLayout() {
   const { currentUser, logout } = useAuth();
   const { cart, cartTotal, cartCount, updateCartItem, removeFromCart, orders, users } = useApp();
 
-  const isSupervisor = currentUser?.clientRole === 'supervisor';
-  const companyClientIds = isSupervisor
-    ? users.filter(u => u.role === 'client' && u.companyId === currentUser.companyId).map(u => u.id)
+  const isSupervisor   = currentUser?.clientRole === 'supervisor';
+  const isAdminEmpresa = currentUser?.clientRole === 'admin_empresa';
+  const canManage      = isSupervisor || isAdminEmpresa;
+
+  // Solo el supervisor ve aprobaciones de su sucursal.
+  const supervisorClientIds = isSupervisor
+    ? users
+        .filter(u =>
+          u.role === 'client' &&
+          u.companyId === currentUser.companyId &&
+          u.sucursalId === currentUser.sucursalId
+        )
+        .map(u => u.id)
     : [];
   const pendingApprovalCount = isSupervisor
-    ? orders.filter(o => o.status === 'Pendiente por aprobar' && companyClientIds.includes(o.clientId)).length
+    ? orders.filter(o => o.status === 'Pendiente por aprobar' && supervisorClientIds.includes(o.clientId)).length
     : 0;
   const navigate = useNavigate();
   const [cartOpen, setCartOpen] = useState(false);
@@ -89,46 +99,48 @@ export default function ClientLayout() {
               Estadísticas
             </NavLink>
             {isSupervisor && (
-              <>
-                <NavLink
-                  to="/cliente/aprobar-pedidos"
-                  className={({ isActive }) =>
-                    `relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition ${isActive ? 'bg-yellow-400 text-blue-900' : 'bg-yellow-400 bg-opacity-20 text-yellow-300 hover:bg-yellow-400 hover:bg-opacity-30 hover:text-yellow-200'}`
-                  }
-                >
-                  <ClipboardCheck className="w-4 h-4" />
-                  Aprobar Pedidos
-                  {pendingApprovalCount > 0 && (
-                    <span className="ml-1 w-5 h-5 bg-rose-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
-                      {pendingApprovalCount}
-                    </span>
-                  )}
-                </NavLink>
-                <NavLink
-                  to="/cliente/administrar"
-                  className={({ isActive }) =>
-                    `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition ${isActive ? 'bg-white bg-opacity-20 text-white' : 'text-blue-200 hover:text-white hover:bg-white hover:bg-opacity-10'}`
-                  }
-                >
-                  <Users className="w-4 h-4" />
-                  Administrar
-                </NavLink>
-              </>
+              <NavLink
+                to="/cliente/aprobar-pedidos"
+                className={({ isActive }) =>
+                  `relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition ${isActive ? 'bg-yellow-400 text-blue-900' : 'bg-yellow-400 bg-opacity-20 text-yellow-300 hover:bg-yellow-400 hover:bg-opacity-30 hover:text-yellow-200'}`
+                }
+              >
+                <ClipboardCheck className="w-4 h-4" />
+                Aprobar Pedidos
+                {pendingApprovalCount > 0 && (
+                  <span className="ml-1 w-5 h-5 bg-rose-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                    {pendingApprovalCount}
+                  </span>
+                )}
+              </NavLink>
+            )}
+            {canManage && (
+              <NavLink
+                to="/cliente/administrar"
+                className={({ isActive }) =>
+                  `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition ${isActive ? 'bg-white bg-opacity-20 text-white' : 'text-blue-200 hover:text-white hover:bg-white hover:bg-opacity-10'}`
+                }
+              >
+                <Users className="w-4 h-4" />
+                Administrar
+              </NavLink>
             )}
           </nav>
 
-          {/* Cart */}
-          <button
-            onClick={() => setCartOpen(true)}
-            className="relative p-2 text-blue-200 hover:text-white hover:bg-white hover:bg-opacity-10 rounded-lg transition"
-          >
-            <ShoppingCart className="w-5 h-5" />
-            {cartCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-5 h-5 bg-yellow-400 text-blue-900 text-xs font-bold rounded-full flex items-center justify-center">
-                {cartCount > 99 ? '99+' : cartCount}
-              </span>
-            )}
-          </button>
+          {/* Cart — admin_empresa es read-only */}
+          {!isAdminEmpresa && (
+            <button
+              onClick={() => setCartOpen(true)}
+              className="relative p-2 text-blue-200 hover:text-white hover:bg-white hover:bg-opacity-10 rounded-lg transition"
+            >
+              <ShoppingCart className="w-5 h-5" />
+              {cartCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 bg-yellow-400 text-blue-900 text-xs font-bold rounded-full flex items-center justify-center">
+                  {cartCount > 99 ? '99+' : cartCount}
+                </span>
+              )}
+            </button>
+          )}
 
           {/* User */}
           <div className="flex items-center gap-2 flex-shrink-0">

@@ -14,6 +14,7 @@ import {
   AlertCircle,
   FileSpreadsheet,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import productFallback from "../../product.webp";
@@ -101,7 +102,10 @@ const EMPTY_FORM = {
   stock: "",
   unit: "Unidad",
   active: true,
-  image: null,
+  imageUrl: null,        // URL persistida en backend
+  imageFile: null,       // File pendiente de subir
+  imagePreview: null,    // base64 para preview local
+  imageRemoved: false,   // marca para borrar imagen existente
   complementaryIds: [],
 };
 
@@ -169,7 +173,10 @@ export default function AdminProducts() {
       stock: String(product.stock),
       unit: product.unit,
       active: product.active,
-      image: product.image || null,
+      imageUrl: product.imageUrl || null,
+      imageFile: null,
+      imagePreview: null,
+      imageRemoved: false,
       complementaryIds: product.complementaryIds || [],
     });
     setCrossSearch("");
@@ -181,8 +188,24 @@ export default function AdminProducts() {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => setForm((f) => ({ ...f, image: ev.target.result }));
+    reader.onload = (ev) =>
+      setForm((f) => ({
+        ...f,
+        imageFile: file,
+        imagePreview: ev.target.result,
+        imageRemoved: false,
+      }));
     reader.readAsDataURL(file);
+  }
+
+  function handleImageRemove() {
+    setForm((f) => ({
+      ...f,
+      imageFile: null,
+      imagePreview: null,
+      imageUrl: null,
+      imageRemoved: true,
+    }));
   }
 
   async function handleSave() {
@@ -201,11 +224,22 @@ export default function AdminProducts() {
       complementaryIds: form.complementaryIds,
     };
     try {
+      let productId;
       if (editProduct) {
         await productsApi.update(editProduct.id, payload);
+        productId = editProduct.id;
       } else {
-        await productsApi.create(payload);
+        const created = await productsApi.create(payload);
+        productId = created.id;
       }
+
+      // Sincronizar imagen
+      if (form.imageFile) {
+        await productsApi.uploadImage(productId, form.imageFile);
+      } else if (editProduct && form.imageRemoved && editProduct.imageUrl) {
+        await productsApi.removeImage(productId);
+      }
+
       await refreshProducts();
       setShowModal(false);
     } catch (err) {
@@ -223,6 +257,19 @@ export default function AdminProducts() {
       await refreshProducts();
     } catch (err) {
       console.error("toggleActive error:", err);
+    }
+  }
+
+  async function handleDelete(product) {
+    const ok = window.confirm(
+      `¿Eliminar "${product.name}"? Si está en pedidos activos no se podrá eliminar.`
+    );
+    if (!ok) return;
+    try {
+      await productsApi.remove(product.id);
+      await refreshProducts();
+    } catch (err) {
+      alert(err?.message || "No se pudo eliminar el producto");
     }
   }
 
@@ -422,9 +469,10 @@ export default function AdminProducts() {
                 >
                   <td className="px-4 py-3">
                     <img
-                      src={product.image || productFallback}
+                      src={product.imageUrl || productFallback}
                       alt={product.name}
                       className="w-11 h-11 object-cover rounded-lg border border-gray-100"
+                      onError={(e) => { e.target.src = productFallback; }}
                     />
                   </td>
                   <td className="px-4 py-3 text-xs font-mono text-gray-500">
@@ -477,6 +525,13 @@ export default function AdminProducts() {
                           <Eye className="w-3.5 h-3.5" />
                         )}
                       </button>
+                      <button
+                        onClick={() => handleDelete(product)}
+                        className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                        title="Eliminar"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -508,14 +563,15 @@ export default function AdminProducts() {
               <label className={labelClass}>Imagen del Producto</label>
               <div className="relative group">
                 <img
-                  src={form.image || productFallback}
+                  src={form.imagePreview || form.imageUrl || productFallback}
                   alt="preview"
                   className="w-full h-44 object-cover rounded-xl border border-gray-200"
+                  onError={(e) => { e.target.src = productFallback; }}
                 />
                 <label className="absolute inset-0 flex flex-col items-center justify-center rounded-xl cursor-pointer bg-black bg-opacity-0 group-hover:bg-opacity-40 transition">
                   <Camera className="w-7 h-7 text-white opacity-0 group-hover:opacity-100 transition mb-1" />
                   <span className="text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition">
-                    {form.image ? "Cambiar imagen" : "Subir imagen"}
+                    {form.imagePreview || form.imageUrl ? "Cambiar imagen" : "Subir imagen"}
                   </span>
                   <input
                     type="file"
@@ -524,10 +580,10 @@ export default function AdminProducts() {
                     onChange={handleImageChange}
                   />
                 </label>
-                {form.image && (
+                {(form.imagePreview || form.imageUrl) && (
                   <button
                     type="button"
-                    onClick={() => setForm((f) => ({ ...f, image: null }))}
+                    onClick={handleImageRemove}
                     className="absolute top-2 right-2 p-1.5 bg-white rounded-full shadow text-gray-500 hover:text-red-600 transition"
                   >
                     <X className="w-4 h-4" />
@@ -711,11 +767,11 @@ export default function AdminProducts() {
                           className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-blue-50 transition"
                         >
                           <img
-                            src={p.image || "/product.webp"}
+                            src={p.imageUrl || productFallback}
                             alt={p.name}
                             className="w-7 h-7 rounded object-cover flex-shrink-0 border border-gray-100"
                             onError={(e) => {
-                              e.target.src = "/product.webp";
+                              e.target.src = productFallback;
                             }}
                           />
                           <div className="min-w-0">

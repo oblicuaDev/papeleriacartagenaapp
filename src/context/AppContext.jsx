@@ -52,9 +52,14 @@ export function AppProvider({ children }) {
         usersApi.list({ role: 'client', limit: 200 }),
       );
     } else if (role === 'client') {
+      // Catálogo + pedidos siempre.
+      // Usuarios y empresa solo si rol gestor (supervisor / admin_empresa) los necesita
+      // — el backend ya filtra por compañía/sucursal.
       loaders.push(
         catalogApi.list({ limit: 100 }).then(r => r.data ?? r),
         ordersApi.list({ limit: 100 }).then(r => r.data ?? r),
+        usersApi.list({ limit: 200 }),
+        companiesApi.list({ active: true }),
       );
     } else if (role === 'delivery') {
       // Backend ya filtra por estados operativos (Alistamiento / En Ruta / Entregado).
@@ -83,6 +88,8 @@ export function AppProvider({ children }) {
       } else if (role === 'client') {
         setProducts(get(1) || []);
         setOrders(get(2)   || []);
+        setUsers(get(3)    || []);
+        setCompanies(get(4) || []);
       } else if (role === 'delivery') {
         setOrders(get(1) || []);
       }

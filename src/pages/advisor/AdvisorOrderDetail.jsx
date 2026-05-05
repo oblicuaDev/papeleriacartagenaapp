@@ -46,6 +46,7 @@ export default function AdvisorOrderDetail() {
       onBack={() => navigate('/asesor')}
       editable={true}
       canAssign={false}
+      canAssignDelivery={true}
       currentUser={currentUser}
       users={users}
       updateOrder={updateOrder}

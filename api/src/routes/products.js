@@ -1,10 +1,45 @@
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { resolvePriceListId, priceSqlFragment } from '../lib/pricing.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// ── Image upload (multer) ───────────────────────────────────
+const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const IMAGE_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+
+const productImageStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const base = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
+    const dir  = path.join(base, 'products');
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, file, cb) => {
+    const ext  = path.extname(file.originalname).toLowerCase();
+    const name = `product_${Date.now()}_${Math.round(Math.random() * 1e6)}${ext}`;
+    cb(null, name);
+  },
+});
+
+const uploadProductImage = multer({
+  storage: productImageStorage,
+  limits:  { fileSize: IMAGE_MAX_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (IMAGE_MIME.includes(file.mimetype)) cb(null, true);
+    else cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'Tipo de imagen no permitido'));
+  },
+});
+
+function publicImageUrl(filename) {
+  const baseUrl = process.env.STORAGE_BASE_URL || 'http://localhost:3000/uploads';
+  return `${baseUrl}/products/${filename}`;
+}
 
 // Resuelve la lista aplicable al request:
 //   admin/advisor con ?priceListId  -> override explicito
@@ -135,7 +170,7 @@ router.get('/:id', async (req, res) => {
 
 // POST /products
 router.post('/', requireRole('admin'), async (req, res) => {
-  const { name, sku, categoryId, description, basePrice, stock = 0, unit, active = true, complementaryIds = [] } = req.body;
+  const { name, sku, categoryId, description, basePrice, stock = 0, unit, active = true, complementaryIds = [], imageUrl } = req.body;
   if (!name || !sku || !categoryId || typeof basePrice !== 'number' || basePrice < 0 || !unit) {
     return res.status(422).json({ error: 'name, sku, categoryId, basePrice (válido y >= 0) y unit son requeridos' });
   }
@@ -147,9 +182,9 @@ router.post('/', requireRole('admin'), async (req, res) => {
     if (!catRows[0]) return res.status(404).json({ error: 'Categoría no encontrada' });
 
     const { rows } = await client.query(
-      `INSERT INTO products (name, sku, category_id, description, base_price, stock, unit, active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [name, sku, categoryId, description || null, basePrice, stock, unit, active]
+      `INSERT INTO products (name, sku, category_id, description, base_price, stock, unit, image_url, active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [name, sku, categoryId, description || null, basePrice, stock, unit, imageUrl || null, active]
     );
     const product = rows[0];
 
@@ -179,7 +214,7 @@ router.post('/', requireRole('admin'), async (req, res) => {
 // PUT /products/:id
 router.put('/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id);
-  const { name, categoryId, description, basePrice, stock, unit, active, complementaryIds } = req.body;
+  const { name, categoryId, description, basePrice, stock, unit, active, complementaryIds, imageUrl } = req.body;
 
   const client = await pool.connect();
   try {
@@ -194,6 +229,7 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     if (stock !== undefined) fields.push(`stock       = $${params.push(stock)}`);
     if (unit !== undefined) fields.push(`unit        = $${params.push(unit)}`);
     if (active !== undefined) fields.push(`active      = $${params.push(active)}`);
+    if (imageUrl !== undefined) fields.push(`image_url   = $${params.push(imageUrl)}`);
 
     if (fields.length) {
       params.push(id);
@@ -228,6 +264,67 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     return res.status(500).json({ error: 'Error interno del servidor' });
   } finally {
     client.release();
+  }
+});
+
+// POST /products/:id/image — subir/reemplazar imagen del producto
+router.post('/:id/image', requireRole('admin'), (req, res) => {
+  const id = parseInt(req.params.id);
+  uploadProductImage.single('image')(req, res, async (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: 'Imagen demasiado grande. Máximo 5 MB' });
+      return res.status(415).json({ error: 'Tipo de imagen no permitido' });
+    }
+    if (err) return res.status(500).json({ error: 'Error al subir la imagen' });
+    if (!req.file) return res.status(422).json({ error: 'image es requerido' });
+
+    try {
+      const { rows: prod } = await pool.query(`SELECT image_url FROM products WHERE id = $1`, [id]);
+      if (!prod[0]) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(404).json({ error: 'Producto no encontrado' });
+      }
+
+      const newUrl = publicImageUrl(req.file.filename);
+      await pool.query(`UPDATE products SET image_url = $1 WHERE id = $2`, [newUrl, id]);
+
+      // Eliminar archivo anterior si existía y vivía en nuestro storage
+      const oldUrl = prod[0].image_url;
+      if (oldUrl && oldUrl.includes('/products/')) {
+        const oldName = path.basename(oldUrl);
+        const localBase = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
+        const oldPath = path.join(localBase, 'products', oldName);
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+
+      return res.json({ id, imageUrl: newUrl });
+    } catch (dbErr) {
+      console.error(dbErr);
+      return res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  });
+});
+
+// DELETE /products/:id/image — quitar imagen del producto
+router.delete('/:id/image', requireRole('admin'), async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const { rows } = await pool.query(`SELECT image_url FROM products WHERE id = $1`, [id]);
+    if (!rows[0]) return res.status(404).json({ error: 'Producto no encontrado' });
+
+    const oldUrl = rows[0].image_url;
+    await pool.query(`UPDATE products SET image_url = NULL WHERE id = $1`, [id]);
+
+    if (oldUrl && oldUrl.includes('/products/')) {
+      const oldName = path.basename(oldUrl);
+      const localBase = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
+      const oldPath = path.join(localBase, 'products', oldName);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+    return res.json({ id, imageUrl: null });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 

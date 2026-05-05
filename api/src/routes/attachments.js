@@ -74,8 +74,20 @@ router.post('/', requireRole('admin', 'advisor', 'delivery'), (req, res) => {
     }
 
     try {
-      const { rows: orderRows } = await pool.query(`SELECT id FROM orders WHERE id = $1`, [orderId]);
+      const { rows: orderRows } = await pool.query(
+        `SELECT id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
+        [orderId]
+      );
       if (!orderRows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
+
+      // PHASE 4: delivery solo puede subir evidencia a sus propios pedidos.
+      if (role === 'delivery' && orderRows[0].delivery_id !== req.user.id) {
+        return res.status(403).json({ error: 'Pedido no asignado a este repartidor' });
+      }
+      // Advisor solo puede subir a pedidos asignados a él.
+      if (role === 'advisor' && orderRows[0].advisor_id !== req.user.id) {
+        return res.status(403).json({ error: 'Pedido asignado a otro asesor' });
+      }
 
       const baseUrl = process.env.STORAGE_BASE_URL || 'http://localhost:3000/uploads';
       const fileUrl = `${baseUrl}/${req.file.filename}`;

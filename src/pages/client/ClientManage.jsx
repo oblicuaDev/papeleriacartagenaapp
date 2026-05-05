@@ -86,6 +86,9 @@ export default function ClientManage() {
         clientRole: userForm.clientRole,
       });
     } else {
+      // PHASE 6: la lista de precios se resuelve en cascada (sucursal > empresa)
+      // y se administra desde "Listas de precios". No se asigna en la creación
+      // del usuario.
       await usersApi.create({
         name:        userForm.name,
         email:       userForm.email,
@@ -94,7 +97,6 @@ export default function ClientManage() {
         clientRole:  userForm.clientRole,
         companyId:   currentUser.companyId,
         sucursalId:  userForm.sucursalId ? Number(userForm.sucursalId) : null,
-        priceListId: currentUser.priceListId,
       });
     }
     await refreshUsers();
@@ -209,11 +211,13 @@ export default function ClientManage() {
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      user.clientRole === 'supervisor'
-                        ? 'bg-purple-100 text-purple-700'
-                        : 'bg-gray-100 text-gray-600'
+                      user.clientRole === 'supervisor' ? 'bg-purple-100 text-purple-700' :
+                      user.clientRole === 'admin_empresa' ? 'bg-indigo-100 text-indigo-700' :
+                      'bg-gray-100 text-gray-600'
                     }`}>
-                      {user.clientRole === 'supervisor' ? 'Supervisor' : 'Creador de pedidos'}
+                      {user.clientRole === 'supervisor' ? 'Supervisor' :
+                       user.clientRole === 'admin_empresa' ? 'Admin empresa' :
+                       'Creador de pedidos'}
                     </span>
                     {user.sucursalId && (
                       <span className="text-xs text-gray-400 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-full">
@@ -367,11 +371,12 @@ export default function ClientManage() {
               >
                 <option value="creador_pedidos">Creador de pedidos</option>
                 <option value="supervisor">Supervisor</option>
+                <option value="admin_empresa">Admin de empresa</option>
               </select>
               <p className="text-xs text-gray-400 mt-1">
-                {userForm.clientRole === 'supervisor'
-                  ? 'Puede crear pedidos y aprobar los de creadores de la empresa.'
-                  : 'Crea pedidos que quedan pendientes de aprobación por un supervisor.'}
+                {userForm.clientRole === 'supervisor' && 'Aprueba pedidos solo de su sucursal.'}
+                {userForm.clientRole === 'creador_pedidos' && 'Crea pedidos que requieren aprobación.'}
+                {userForm.clientRole === 'admin_empresa' && 'Visión completa de todas las sucursales (solo lectura, no aprueba).'}
               </p>
             </div>
             <div className="flex gap-3 pt-2">

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, X, Truck, UserCog } from 'lucide-react';
+import { Plus, X, Truck, UserCog, Pencil, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { usersApi } from '../../services/api';
 
@@ -19,7 +19,7 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-const EMPTY_FORM = { name: '', email: '', password: '', role: 'advisor', branchId: '', initials: '' };
+const EMPTY_FORM = { name: '', email: '', password: '', role: 'advisor', branchId: '', initials: '', active: true };
 
 const ROLE_META = {
   advisor:  { label: 'Asesor',     pillCls: 'bg-purple-100 text-purple-700' },
@@ -29,9 +29,11 @@ const ROLE_META = {
 export default function AdminUsers() {
   const { users, refreshUsers, branches } = useApp();
   const [showModal, setShowModal] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [tab, setTab]   = useState('advisor'); // 'advisor' | 'delivery'
   const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const filteredUsers = users.filter(u => u.role === tab);
 
@@ -40,29 +42,77 @@ export default function AdminUsers() {
   }
 
   function openCreate(role = tab) {
+    setEditingUser(null);
     setForm({ ...EMPTY_FORM, role, branchId: branches[0]?.id || '' });
     setError(null);
     setShowModal(true);
   }
 
+  function openEdit(user) {
+    setEditingUser(user);
+    setForm({
+      name:     user.name || '',
+      email:    user.email || '',
+      password: '',
+      role:     user.role,
+      branchId: user.branchId ?? '',
+      initials: user.initials || '',
+      active:   user.active,
+    });
+    setError(null);
+    setShowModal(true);
+  }
+
   async function handleSave() {
-    if (!form.name || !form.email || !form.password) {
-      setError('Nombre, email y contraseña son obligatorios');
+    if (!form.name || !form.email) {
+      setError('Nombre y email son obligatorios');
       return;
     }
+    if (!editingUser && !form.password) {
+      setError('Contraseña es obligatoria al crear');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const initials = form.initials || form.name.split(' ').map(s => s[0]).join('').slice(0, 3).toUpperCase();
     try {
-      await usersApi.create({
-        name:     form.name,
-        email:    form.email,
-        password: form.password,
-        role:     form.role,
-        branchId: Number(form.branchId),
-        initials: form.initials || form.name.split(' ').map(s => s[0]).join('').slice(0, 3).toUpperCase(),
-      });
+      if (editingUser) {
+        const payload = {
+          name:     form.name,
+          email:    form.email,
+          branchId: form.branchId ? Number(form.branchId) : null,
+          active:   form.active,
+        };
+        if (form.password) payload.password = form.password;
+        await usersApi.update(editingUser.id, payload);
+      } else {
+        await usersApi.create({
+          name:     form.name,
+          email:    form.email,
+          password: form.password,
+          role:     form.role,
+          branchId: form.branchId ? Number(form.branchId) : null,
+          initials,
+          active:   form.active,
+        });
+      }
       await refreshUsers();
       setShowModal(false);
     } catch (err) {
-      setError(err?.message || 'No se pudo crear el usuario');
+      setError(err?.message || 'No se pudo guardar el usuario');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(user) {
+    const ok = window.confirm(`¿Eliminar a ${user.name}? Quedará desactivado y no podrá iniciar sesión.`);
+    if (!ok) return;
+    try {
+      await usersApi.remove(user.id);
+      await refreshUsers();
+    } catch (err) {
+      alert(err?.message || 'No se pudo eliminar el usuario');
     }
   }
 
@@ -70,7 +120,6 @@ export default function AdminUsers() {
   const labelClass = 'block text-sm font-medium text-gray-700 mb-1';
 
   const tabMeta = ROLE_META[tab];
-  const TabIcon = tab === 'delivery' ? Truck : UserCog;
 
   return (
     <div className="space-y-5">
@@ -121,6 +170,7 @@ export default function AdminUsers() {
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Email</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Sede</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Estado</th>
+                <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -145,11 +195,29 @@ export default function AdminUsers() {
                       {u.active ? 'Activo' : 'Inactivo'}
                     </span>
                   </td>
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-1 justify-end">
+                      <button
+                        onClick={() => openEdit(u)}
+                        title="Editar"
+                        className="p-1.5 text-gray-400 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(u)}
+                        title="Eliminar"
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-400">
+                  <td colSpan={5} className="px-5 py-10 text-center text-sm text-gray-400">
                     No hay {tabMeta.label.toLowerCase()}s registrados
                   </td>
                 </tr>
@@ -160,7 +228,10 @@ export default function AdminUsers() {
       </div>
 
       {showModal && (
-        <Modal title={`Nuevo ${ROLE_META[form.role].label}`} onClose={() => setShowModal(false)}>
+        <Modal
+          title={editingUser ? `Editar ${ROLE_META[form.role].label}` : `Nuevo ${ROLE_META[form.role].label}`}
+          onClose={() => setShowModal(false)}
+        >
           <div className="space-y-4">
             <div>
               <label className={labelClass}>Nombre completo *</label>
@@ -171,20 +242,28 @@ export default function AdminUsers() {
               <input className={inputClass} type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="ejemplo@oblicua.com" />
             </div>
             <div>
-              <label className={labelClass}>Contraseña *</label>
+              <label className={labelClass}>
+                {editingUser ? 'Nueva contraseña (vacío = no cambiar)' : 'Contraseña *'}
+              </label>
               <input className={inputClass} type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="••••••••" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Rol</label>
-                <select className={inputClass} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
+                <select
+                  className={inputClass}
+                  value={form.role}
+                  onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                  disabled={!!editingUser}
+                >
                   <option value="advisor">Asesor</option>
                   <option value="delivery">Repartidor</option>
                 </select>
               </div>
               <div>
-                <label className={labelClass}>Sede asignada *</label>
+                <label className={labelClass}>Sede asignada</label>
                 <select className={inputClass} value={form.branchId} onChange={e => setForm(f => ({ ...f, branchId: e.target.value }))}>
+                  <option value="">— Sin sede —</option>
                   {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </div>
@@ -193,13 +272,31 @@ export default function AdminUsers() {
               <label className={labelClass}>Iniciales (max 3)</label>
               <input className={inputClass} maxLength={3} value={form.initials} onChange={e => setForm(f => ({ ...f, initials: e.target.value.toUpperCase() }))} placeholder="AM" />
             </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="userActive"
+                checked={form.active}
+                onChange={e => setForm(f => ({ ...f, active: e.target.checked }))}
+                className="rounded"
+              />
+              <label htmlFor="userActive" className="text-sm text-gray-700">Usuario activo</label>
+            </div>
             {error && <p className="text-xs text-red-600">{error}</p>}
             <div className="flex gap-3 pt-2">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
+              <button
+                onClick={() => setShowModal(false)}
+                disabled={saving}
+                className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition disabled:opacity-50"
+              >
                 Cancelar
               </button>
-              <button onClick={handleSave} className="flex-1 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition">
-                Crear {ROLE_META[form.role].label}
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition disabled:opacity-50"
+              >
+                {saving ? 'Guardando...' : editingUser ? 'Guardar cambios' : `Crear ${ROLE_META[form.role].label}`}
               </button>
             </div>
           </div>

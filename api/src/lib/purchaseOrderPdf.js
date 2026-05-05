@@ -10,10 +10,22 @@
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import pool from '../config/db.js';
 
 const STORAGE_DIR  = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
 const STORAGE_URL  = process.env.STORAGE_BASE_URL   || 'http://localhost:3000/uploads';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Ruta absoluta al logo embebido en los exports.
+// LOGO_PATH (env) puede sobre-escribirla; por defecto vive en api/assets/.
+export const LOGO_PATH =
+  process.env.LOGO_PATH ||
+  path.resolve(__dirname, '../../assets/logo-cartagena.jpg');
+
+const COMPANY_NAME    = 'Papelería Cartagena';
+const COMPANY_TAGLINE = 'Suministros de papelería y oficina';
 
 function formatCOP(amount) {
   if (amount == null || isNaN(amount)) return '$0';
@@ -74,15 +86,44 @@ function renderPdf({ order, items, outputPath }) {
     stream.on('finish', () => resolve());
     doc.pipe(stream);
 
-    // ── Header ───────────────────────────────────────────────
-    doc.font('Helvetica-Bold').fontSize(20)
+    // ── Header con logo + nombre empresa ─────────────────────
+    const headerTop = doc.y;
+    let logoEmbedded = false;
+    try {
+      if (fs.existsSync(LOGO_PATH)) {
+        doc.image(LOGO_PATH, 50, headerTop, { fit: [70, 50] });
+        logoEmbedded = true;
+      }
+    } catch (e) {
+      // Si el logo falla, seguimos sin él para no romper el PDF.
+      console.warn('[purchaseOrderPdf] no se pudo embeber el logo:', e.message);
+    }
+
+    const titleX = logoEmbedded ? 130 : 50;
+    const titleW = 562 - titleX;
+    doc.font('Helvetica-Bold').fontSize(16).fillColor('#1E40AF')
+       .text(COMPANY_NAME, titleX, headerTop + 4, { width: titleW });
+    doc.font('Helvetica').fontSize(9).fillColor('#666666')
+       .text(COMPANY_TAGLINE, titleX, doc.y, { width: titleW });
+    doc.fillColor('#000000');
+
+    // Línea separadora bajo el header
+    const headerBottom = headerTop + 60;
+    doc.moveTo(50, headerBottom).lineTo(562, headerBottom)
+       .strokeColor('#1E40AF').lineWidth(1.2).stroke();
+    doc.lineWidth(1).strokeColor('#000000');
+    doc.y = headerBottom + 12;
+
+    // ── Título del documento ─────────────────────────────────
+    doc.font('Helvetica-Bold').fontSize(18)
        .text('ORDEN DE COMPRA', { align: 'center' });
     doc.font('Helvetica-Bold').fontSize(12)
        .text(order.id, { align: 'center' });
-    doc.moveDown(0.5);
-    doc.font('Helvetica').fontSize(9)
+    doc.moveDown(0.3);
+    doc.font('Helvetica').fontSize(9).fillColor('#666666')
        .text(`Generada: ${formatDate(new Date())}`, { align: 'center' });
-    doc.moveDown(1.5);
+    doc.fillColor('#000000');
+    doc.moveDown(1.2);
 
     // ── Bloque cliente ──────────────────────────────────────
     doc.font('Helvetica-Bold').fontSize(11).text('CLIENTE');

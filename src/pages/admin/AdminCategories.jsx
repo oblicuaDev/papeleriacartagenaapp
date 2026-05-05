@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Pencil, Eye, EyeOff, X, Tag } from 'lucide-react';
+import { Plus, Pencil, Eye, EyeOff, X, Tag, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { categoriesApi } from '../../services/api';
 
@@ -73,6 +73,22 @@ export default function AdminCategories() {
     await refreshCategories();
   }
 
+  async function handleDelete(cat) {
+    const count = getProductCount(cat.id);
+    if (count > 0) {
+      alert(`La categoría "${cat.name}" tiene ${count} producto(s) asociado(s). Reasígnalos antes de eliminar.`);
+      return;
+    }
+    const ok = window.confirm(`¿Eliminar la categoría "${cat.name}"?`);
+    if (!ok) return;
+    try {
+      await categoriesApi.remove(cat.id);
+      await refreshCategories();
+    } catch (err) {
+      alert(err?.message || 'No se pudo eliminar la categoría');
+    }
+  }
+
   const inputClass = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
 
   return (
@@ -107,11 +123,14 @@ export default function AdminCategories() {
                 </div>
               </div>
               <div className="flex gap-1">
-                <button onClick={() => openEdit(cat)} className="p-1.5 text-gray-400 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition">
+                <button onClick={() => openEdit(cat)} title="Editar" className="p-1.5 text-gray-400 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition">
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
-                <button onClick={() => toggleActive(cat.id)} className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition">
+                <button onClick={() => toggleActive(cat.id)} title={cat.active ? 'Desactivar' : 'Activar'} className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition">
                   {cat.active ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+                <button onClick={() => handleDelete(cat)} title="Eliminar" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition">
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>

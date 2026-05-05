@@ -29,11 +29,12 @@ export function requireRole(...roles) {
   };
 }
 
-// Verifica que sea admin O supervisor
+// Verifica que sea admin O supervisor O admin_empresa
 export function requireAdminOrSupervisor(req, res, next) {
   const { role, clientRole } = req.user;
-  if (role === 'admin' || (role === 'client' && clientRole === 'supervisor')) {
+  if (role === 'admin') return next();
+  if (role === 'client' && (clientRole === 'supervisor' || clientRole === 'admin_empresa')) {
     return next();
   }
-  return res.status(403).json({ error: 'Se requiere rol admin o supervisor' });
+  return res.status(403).json({ error: 'Se requiere rol admin, supervisor o admin_empresa' });
 }

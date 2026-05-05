@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { ShoppingCart, Grid, List, Plus, Minus, X, Package } from 'lucide-react';
+import { ShoppingCart, Grid, List, Plus, Minus, X, Package, Filter } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { formatCOP } from '../../data/mockData';
@@ -15,10 +15,17 @@ const CATEGORY_COLORS = [
 ];
 
 function ProductImage({ image, name, className }) {
-  return <img src={image || productFallback} alt={name} className={className} />;
+  return (
+    <img
+      src={image || productFallback}
+      alt={name}
+      className={className}
+      onError={(e) => { e.target.src = productFallback; }}
+    />
+  );
 }
 
-function ProductModal({ product, price, categoryName, categoryColor, onClose, onAdd }) {
+function ProductModal({ product, price, categoryName, categoryColor, onClose, onAdd, readOnly }) {
   const [qty, setQty] = useState(1);
 
   function handleAdd() {
@@ -35,7 +42,7 @@ function ProductModal({ product, price, categoryName, categoryColor, onClose, on
         {/* Image */}
         <div className="relative w-full h-64 bg-gray-50">
           <ProductImage
-            image={product.image}
+            image={product.imageUrl}
             name={product.name}
             className="w-full h-full object-contain p-4"
           />
@@ -72,37 +79,39 @@ function ProductModal({ product, price, categoryName, categoryColor, onClose, on
             <p className="text-xs text-gray-400">por {product.unit}</p>
           </div>
 
-          {/* Quantity + Add */}
-          <div className="flex items-center gap-3 pt-1">
-            <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
+          {/* Quantity + Add — solo para roles que crean pedidos */}
+          {!readOnly && (
+            <div className="flex items-center gap-3 pt-1">
+              <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setQty(q => Math.max(1, q - 1))}
+                  className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-100 transition"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  value={qty}
+                  onChange={e => setQty(Math.max(1, Number(e.target.value)))}
+                  className="w-14 text-center py-2 text-sm font-medium focus:outline-none border-x border-gray-300"
+                />
+                <button
+                  onClick={() => setQty(q => q + 1)}
+                  className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-100 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
               <button
-                onClick={() => setQty(q => Math.max(1, q - 1))}
-                className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-100 transition"
+                onClick={handleAdd}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm font-semibold transition"
               >
-                <Minus className="w-3.5 h-3.5" />
-              </button>
-              <input
-                type="number"
-                min={1}
-                value={qty}
-                onChange={e => setQty(Math.max(1, Number(e.target.value)))}
-                className="w-14 text-center py-2 text-sm font-medium focus:outline-none border-x border-gray-300"
-              />
-              <button
-                onClick={() => setQty(q => q + 1)}
-                className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-100 transition"
-              >
-                <Plus className="w-3.5 h-3.5" />
+                <ShoppingCart className="w-4 h-4" />
+                Agregar a mi pedido
               </button>
             </div>
-            <button
-              onClick={handleAdd}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm font-semibold transition"
-            >
-              <ShoppingCart className="w-4 h-4" />
-              Agregar a mi pedido
-            </button>
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -113,6 +122,8 @@ export default function ClientCatalog() {
   const context = useOutletContext() || {};
   const headerSearch = context.search || '';
   const { products, categories, addToCart } = useApp();
+  const { currentUser } = useAuth();
+  const isReadOnly = currentUser?.clientRole === 'admin_empresa';
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [viewMode, setViewMode] = useState('grid');
   const [modalProduct, setModalProduct] = useState(null);
@@ -151,33 +162,22 @@ export default function ClientCatalog() {
         <p className="text-sm text-gray-500 mt-1">{filtered.length} productos disponibles</p>
       </div>
 
-      {/* Category Chips */}
-      <div className="flex gap-2 flex-wrap">
-        <button
-          onClick={() => setSelectedCategory(null)}
-          className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
-            !selectedCategory ? 'bg-blue-700 text-white' : 'bg-white text-gray-600 border border-gray-300 hover:border-blue-400'
-          }`}
-        >
-          Todos
-        </button>
-        {categories.filter(c => c.active).map(cat => (
-          <button
-            key={cat.id}
-            onClick={() => setSelectedCategory(selectedCategory === cat.id ? null : cat.id)}
-            className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${
-              selectedCategory === cat.id
-                ? 'bg-blue-700 text-white'
-                : 'bg-white text-gray-600 border border-gray-300 hover:border-blue-400'
-            }`}
+      {/* Category Dropdown + View Toggle */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="relative">
+          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+          <select
+            value={selectedCategory ?? ''}
+            onChange={e => setSelectedCategory(e.target.value ? Number(e.target.value) : null)}
+            className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[220px]"
           >
-            {cat.name}
-          </button>
-        ))}
-      </div>
+            <option value="">Todas las categorías</option>
+            {categories.filter(c => c.active).map(cat => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+        </div>
 
-      {/* View Toggle */}
-      <div className="flex items-center justify-between">
         <div className="flex border border-gray-300 rounded-lg overflow-hidden">
           <button
             onClick={() => setViewMode('grid')}
@@ -208,7 +208,7 @@ export default function ClientCatalog() {
                 {/* Product image */}
                 <div className="relative w-full h-44 overflow-hidden bg-gray-50">
                   <ProductImage
-                    image={product.image}
+                    image={product.imageUrl}
                     name={product.name}
                     className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
                   />
@@ -264,7 +264,7 @@ export default function ClientCatalog() {
                     >
                       <td className="px-4 py-3">
                         <ProductImage
-                          image={product.image}
+                          image={product.imageUrl}
                           name={product.name}
                           className="w-12 h-12 object-contain rounded-lg bg-gray-50 p-0.5"
                         />
@@ -307,6 +307,7 @@ export default function ClientCatalog() {
           categoryColor={getCategoryColor(modalProduct.categoryId)}
           onClose={() => setModalProduct(null)}
           onAdd={(qty) => handleAdd(modalProduct, qty)}
+          readOnly={isReadOnly}
         />
       )}
     </div>

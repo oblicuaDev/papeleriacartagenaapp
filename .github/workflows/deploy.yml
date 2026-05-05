@@ -15,13 +15,14 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
-      # (Opcional) build frontend aquí en vez de VM
-      - name: Build client
-        run: |
-          cd client
-          npm install
-          npm run build
+      - name: Copy frontend (dist)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "dist/*"
+          target: "/var/www/papeleria-cartagena/client"
 
       - name: Copy build to server
         uses: appleboy/scp-action@v0.1.7

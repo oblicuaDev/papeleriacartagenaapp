@@ -45,9 +45,9 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
   try {
     const fields = [];
     const params = [];
-    if (name        !== undefined) fields.push(`name        = $${params.push(name)}`);
+    if (name !== undefined) fields.push(`name        = $${params.push(name)}`);
     if (description !== undefined) fields.push(`description = $${params.push(description)}`);
-    if (active      !== undefined) fields.push(`active      = $${params.push(active)}`);
+    if (active !== undefined) fields.push(`active      = $${params.push(active)}`);
     if (!fields.length) return res.status(422).json({ error: 'No hay campos para actualizar' });
 
     params.push(id);
@@ -68,9 +68,16 @@ router.delete('/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     const { rows } = await pool.query(
-      `SELECT id FROM products WHERE category_id = $1 LIMIT 1`, [id]
+      `SELECT id FROM products WHERE category_id = $1 AND active = true LIMIT 1`,
+      [id]
     );
-    if (rows.length) return res.status(409).json({ error: 'La categoría tiene productos asociados' });
+
+    if (rows.length) {
+      return res.status(409).json({
+        error: 'La categoría tiene productos activos asociados'
+      });
+    }
+
     await pool.query(`UPDATE categories SET active = false WHERE id = $1`, [id]);
     return res.json({ message: 'Categoría eliminada' });
   } catch (err) {

@@ -16,12 +16,12 @@ const IMAGE_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 const productImageStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     const base = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
-    const dir  = path.join(base, 'products');
+    const dir = path.join(base, 'products');
     fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },
   filename: (_req, file, cb) => {
-    const ext  = path.extname(file.originalname).toLowerCase();
+    const ext = path.extname(file.originalname).toLowerCase();
     const name = `product_${Date.now()}_${Math.round(Math.random() * 1e6)}${ext}`;
     cb(null, name);
   },
@@ -29,7 +29,7 @@ const productImageStorage = multer.diskStorage({
 
 const uploadProductImage = multer({
   storage: productImageStorage,
-  limits:  { fileSize: IMAGE_MAX_SIZE },
+  limits: { fileSize: IMAGE_MAX_SIZE },
   fileFilter: (_req, file, cb) => {
     if (IMAGE_MIME.includes(file.mimetype)) cb(null, true);
     else cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'Tipo de imagen no permitido'));
@@ -61,9 +61,9 @@ router.get('/', async (req, res) => {
   // condParams indexa desde $1 y se reutiliza igual en la count query.
   // multiplier, limit y offset se appenden al final para no desplazar los índices WHERE.
   const condParams = [];
-  const conditions = ['p.active = true'];
+  const conditions = [];
 
-  if (active !== undefined) conditions[0] = `p.active = $${condParams.push(active === 'true')}`;
+  if (active !== undefined) conditions.push(`p.active = $${condParams.push(active === 'true')}`);
   if (categoryId) conditions.push(`p.category_id = $${condParams.push(parseInt(categoryId))}`);
   if (search) {
     const s = '%' + search + '%';
@@ -74,7 +74,7 @@ router.get('/', async (req, res) => {
     );
   }
 
-  const where = 'WHERE ' + conditions.join(' AND ');
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
   try {
     const priceListId = await resolveListForRequest(req);
@@ -281,7 +281,7 @@ router.post('/:id/image', requireRole('admin'), (req, res) => {
     try {
       const { rows: prod } = await pool.query(`SELECT image_url FROM products WHERE id = $1`, [id]);
       if (!prod[0]) {
-        fs.unlink(req.file.path, () => {});
+        fs.unlink(req.file.path, () => { });
         return res.status(404).json({ error: 'Producto no encontrado' });
       }
 

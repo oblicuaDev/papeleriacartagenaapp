@@ -10,9 +10,9 @@ router.use(requireAuth, requireRole('client'));
 router.get('/', async (req, res) => {
   const { id: userId, companyId } = req.user;
   const { categoryId, search, page = 1, limit = 20 } = req.query;
-  const pageNum  = Math.max(1, parseInt(page));
+  const pageNum = Math.max(1, parseInt(page));
   const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
-  const offset   = (pageNum - 1) * limitNum;
+  const offset = (pageNum - 1) * limitNum;
 
   try {
     // Lista aplicable: sucursal > company > user. Si no hay lista, usamos base_price.
@@ -29,7 +29,10 @@ router.get('/', async (req, res) => {
 
     // params: [priceListId, ...condParams, limit, offset]
     const params = [priceListId];
-    const conditions = ['p.active = true'];
+    const conditions = [
+      'p.active = true',
+      'c.active = true'
+    ];
 
     if (categoryId) conditions.push(`p.category_id = $${params.push(parseInt(categoryId))}`);
     if (search) {
@@ -78,9 +81,9 @@ router.get('/', async (req, res) => {
     return res.json({
       priceListId,
       priceListName,
-      data:  rows,
+      data: rows,
       total: parseInt(countRows[0].count),
-      page:  pageNum,
+      page: pageNum,
       limit: limitNum,
     });
   } catch (err) {

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Plus,
   Search,
@@ -102,10 +102,10 @@ const EMPTY_FORM = {
   stock: "",
   unit: "Unidad",
   active: true,
-  imageUrl: null,        // URL persistida en backend
-  imageFile: null,       // File pendiente de subir
-  imagePreview: null,    // base64 para preview local
-  imageRemoved: false,   // marca para borrar imagen existente
+  imageUrl: null, // URL persistida en backend
+  imageFile: null, // File pendiente de subir
+  imagePreview: null, // base64 para preview local
+  imageRemoved: false, // marca para borrar imagen existente
   complementaryIds: [],
 };
 
@@ -131,9 +131,10 @@ function Modal({ title, onClose, children }) {
 }
 
 export default function AdminProducts() {
-  const { products, setProducts, categories, refreshProducts } = useApp();
+  const { products, setProducts, categories } = useApp();
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
+  const [filterActive, setFilterActive] = useState(""); // "", "true", "false"
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
@@ -240,7 +241,7 @@ export default function AdminProducts() {
         await productsApi.removeImage(productId);
       }
 
-      await refreshProducts();
+      await loadProducts();
       setShowModal(false);
     } catch (err) {
       setSaveError(err.message || "Error al guardar el producto");
@@ -254,7 +255,7 @@ export default function AdminProducts() {
     if (!product) return;
     try {
       await productsApi.update(id, { active: !product.active });
-      await refreshProducts();
+      await loadProducts();
     } catch (err) {
       console.error("toggleActive error:", err);
     }
@@ -262,12 +263,12 @@ export default function AdminProducts() {
 
   async function handleDelete(product) {
     const ok = window.confirm(
-      `¿Eliminar "${product.name}"? Si está en pedidos activos no se podrá eliminar.`
+      `¿Eliminar "${product.name}"? Si está en pedidos activos no se podrá eliminar.`,
     );
     if (!ok) return;
     try {
       await productsApi.remove(product.id);
-      await refreshProducts();
+      await loadProducts();
     } catch (err) {
       alert(err?.message || "No se pudo eliminar el producto");
     }
@@ -318,7 +319,7 @@ export default function AdminProducts() {
         failed.push({ sku: r.sku, reason: err.message });
       }
     }
-    await refreshProducts();
+    await loadProducts();
     setImporting(false);
     setImportDoneCount(created);
     // Marcar en preview las filas que fallaron en la API
@@ -333,37 +334,29 @@ export default function AdminProducts() {
     setImportStep(IMPORT_STEPS.DONE);
   }
 
-  // 1. Escuchar los cambios en la búsqueda y categoría para consultar la API
+  // Carga productos desde la API con los filtros actuales (incluye activos e inactivos)
+  const loadProducts = useCallback(async () => {
+    try {
+      const params = { limit: 100 };
+      if (search && search.trim() !== "") params.search = search;
+      if (filterCategory && filterCategory !== "")
+        params.categoryId = filterCategory;
+      console.log({ filterActive });
+
+      if (filterActive !== "") params.active = filterActive;
+
+      const response = await productsApi.list(params);
+      setProducts(response.data || response);
+    } catch (err) {
+      console.error("Error al buscar en la API:", err);
+    }
+  }, [search, filterCategory, filterActive, setProducts]);
+
+  // Debounce los cambios de filtros para no saturar la API
   useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      try {
-        // Construimos un objeto de parámetros limpio
-        const params = {
-          limit: 100,
-        };
-
-        // Solo agregamos 'search' si tiene texto
-        if (search && search.trim() !== "") {
-          params.search = search;
-        }
-
-        // Solo agregamos 'categoryId' si se seleccionó una (diferente de vacío)
-        if (filterCategory && filterCategory !== "") {
-          params.categoryId = filterCategory;
-        }
-
-        // Llamamos a la API solo con los parámetros que existen
-        const response = await productsApi.list(params);
-
-        // Actualizamos el estado global
-        setProducts(response.data || response);
-      } catch (err) {
-        console.error("Error al buscar en la API:", err);
-      }
-    }, 500);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [search, filterCategory, setProducts]);
+    const t = setTimeout(loadProducts, 500);
+    return () => clearTimeout(t);
+  }, [loadProducts]);
 
   const inputClass =
     "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent";
@@ -424,6 +417,18 @@ export default function AdminProducts() {
             ))}
           </select>
         </div>
+        <div className="relative">
+          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <select
+            value={filterActive}
+            onChange={(e) => setFilterActive(e.target.value)}
+            className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none"
+          >
+            <option value="">Todos (activos e inactivos)</option>
+            <option value="true">Solo activos</option>
+            <option value="false">Solo inactivos</option>
+          </select>
+        </div>
       </div>
 
       {/* Table */}
@@ -472,7 +477,9 @@ export default function AdminProducts() {
                       src={product.imageUrl || productFallback}
                       alt={product.name}
                       className="w-11 h-11 object-cover rounded-lg border border-gray-100"
-                      onError={(e) => { e.target.src = productFallback; }}
+                      onError={(e) => {
+                        e.target.src = productFallback;
+                      }}
                     />
                   </td>
                   <td className="px-4 py-3 text-xs font-mono text-gray-500">
@@ -566,12 +573,16 @@ export default function AdminProducts() {
                   src={form.imagePreview || form.imageUrl || productFallback}
                   alt="preview"
                   className="w-full h-44 object-cover rounded-xl border border-gray-200"
-                  onError={(e) => { e.target.src = productFallback; }}
+                  onError={(e) => {
+                    e.target.src = productFallback;
+                  }}
                 />
                 <label className="absolute inset-0 flex flex-col items-center justify-center rounded-xl cursor-pointer bg-black bg-opacity-0 group-hover:bg-opacity-40 transition">
                   <Camera className="w-7 h-7 text-white opacity-0 group-hover:opacity-100 transition mb-1" />
                   <span className="text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition">
-                    {form.imagePreview || form.imageUrl ? "Cambiar imagen" : "Subir imagen"}
+                    {form.imagePreview || form.imageUrl
+                      ? "Cambiar imagen"
+                      : "Subir imagen"}
                   </span>
                   <input
                     type="file"

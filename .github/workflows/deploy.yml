@@ -1,48 +1,49 @@
 name: Deploy Papeleria
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 on:
   push:
     branches:
       - main
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Debug build
-        run: |
-          echo "=== ROOT ==="
-          ls -la
-
-          echo "=== PACKAGE.JSON ==="
-          cat package.json || echo "no hay package.json en root"
-
-          echo "=== DIST ==="
-          ls -la dist || echo "dist no existe"
+      # 1. Traer código
       - name: Checkout repo
         uses: actions/checkout@v4
-      - name: Copy frontend (dist)
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "dist/*"
-          target: "/var/www/papeleria-cartagena/client"
 
+      # 2. Verificar estructura (puedes quitar luego)
+      - name: Debug repo
+        run: |
+          ls -la
+
+      # 3. Instalar y build frontend
+      - name: Build frontend
+        run: |
+          npm install
+          npm run build
+
+      # 4. Verificar dist
+      - name: Verify build
+        run: |
+          ls -la dist
+
+      # 5. Copiar a VM
       - name: Copy build to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "dist/*"
+          source: "dist"
           target: "/var/www/papeleria-cartagena/client"
 
+      # 6. Deploy backend
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -52,8 +53,6 @@ jobs:
           script: |
             cd /var/www/papeleria-cartagena/api
             git pull origin main
-
             npm ci --omit=dev
             pm2 reload papeleria-api --update-env
-
             sudo systemctl reload nginx

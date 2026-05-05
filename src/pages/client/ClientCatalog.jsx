@@ -160,6 +160,9 @@ export default function ClientCatalog() {
 
   const search = headerSearch;
 
+  // DEBUG OBLIGATORIO: Estado del context
+  console.log("PRODUCTS CONTEXT:", products);
+
   function getCategoryName(id) {
     return categories.find((c) => c.id === id)?.name || "—";
   }
@@ -169,24 +172,31 @@ export default function ClientCatalog() {
     return CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
   }
 
-  // /catalog ya filtra active=true en backend; aqui solo aplicamos UI filters
-  const filtered = products.filter((p) => {
+  // CORRECCIÓN: Prevención de errores con null o arrays vacíos
+  const safeProducts = Array.isArray(products) ? products : [];
+
+  const filtered = safeProducts.filter((p) => {
+    // Evitamos crash de React si name o sku llegan null
+    const pName = p.name || "";
+    const pSku = p.sku || "";
+
     const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase());
+      pName.toLowerCase().includes(search.toLowerCase()) ||
+      pSku.toLowerCase().includes(search.toLowerCase());
+
+    // p.categoryId ya existe gracias al ALIAS del SQL
     const matchCat = selectedCategory
       ? p.categoryId === selectedCategory
       : true;
+
     return matchSearch && matchCat;
   });
 
   function handleAdd(product, qty) {
-    // product.price ya viene resuelto por backend (sucursal > company > user > base)
     addToCart(product, qty, product.price);
   }
 
   const modalPrice = modalProduct ? modalProduct.price : 0;
-  console.log("products:", products);
   return (
     <div className="space-y-5">
       <div>

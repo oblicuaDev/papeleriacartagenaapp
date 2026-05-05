@@ -15,7 +15,6 @@ router.get('/', async (req, res) => {
   const offset = (pageNum - 1) * limitNum;
 
   try {
-    // Lista aplicable: sucursal > company > user. Si no hay lista, usamos base_price.
     const priceListId = await resolvePriceListId({ companyId, userId });
 
     let priceListName = null;
@@ -27,7 +26,6 @@ router.get('/', async (req, res) => {
       priceListName = plRows[0]?.name ?? null;
     }
 
-    // params: [priceListId, ...condParams, limit, offset]
     const params = [priceListId];
     const conditions = [
       'p.active = true',
@@ -35,32 +33,40 @@ router.get('/', async (req, res) => {
     ];
 
     if (categoryId) conditions.push(`p.category_id = $${params.push(parseInt(categoryId))}`);
+
     if (search) {
       const s = '%' + search + '%';
-      conditions.push(
-        `(p.name ILIKE $${params.push(s)} OR p.sku ILIKE $${params.push(s)})`
-      );
+      params.push(s);
+      const sIndex = params.length;
+      // Reutilizamos el mismo índice para optimizar la query
+      conditions.push(`(p.name ILIKE $${sIndex} OR p.sku ILIKE $${sIndex})`);
     }
 
     const where = 'WHERE ' + conditions.join(' AND ');
-    const condParamCount = params.length; // antes de limit/offset
+    const condParamCount = params.length;
+
+    // DEBUG OBLIGATORIO: Query Params
+    console.log("QUERY PARAMS:", params);
 
     const { select: priceSelect, join: priceJoin } = priceSqlFragment({
       alias: 'p',
       listIdParam: '$1',
     });
 
+    // Se asignan ALIAS en camelCase para que el frontend los lea correctamente
     const { rows } = await pool.query(
       `SELECT
-         p.id, p.name, p.sku, p.category_id,
-         c.name AS category_name,
+         p.id, p.name, p.sku, 
+         p.category_id AS "categoryId",
+         c.name AS "categoryName",
          p.description,
          ${priceSelect} AS price,
-         p.stock, p.unit, p.image_url,
+         p.stock, p.unit, 
+         p.image_url AS "imageUrl",
          COALESCE(
            ARRAY(SELECT complementary_id FROM product_complementaries WHERE product_id = p.id),
            '{}'
-         ) AS complementary_ids
+         ) AS "complementaryIds"
        FROM products p
        JOIN categories c ON c.id = p.category_id
        ${priceJoin}
@@ -70,11 +76,16 @@ router.get('/', async (req, res) => {
       params
     );
 
-    // Count: la condicion no usa $1 (priceListId), pero los placeholders
-    // siguen alineados porque condParams ocupan $2..$N.
-    // Reusamos params[0..condParamCount] para el count.
+    // DEBUG OBLIGATORIO: Rows encontradas
+    console.log("CATALOG ROWS:", rows.length);
+
+    // CORRECCIÓN: Se agrega ${priceJoin} al COUNT para mantener alineado 
+    // el parámetro $1 y evitar el error 08P01 de PostgreSQL.
     const { rows: countRows } = await pool.query(
-      `SELECT COUNT(*) FROM products p ${where}`,
+      `SELECT COUNT(*) FROM products p 
+       JOIN categories c ON c.id = p.category_id 
+       ${priceJoin}
+       ${where}`,
       params.slice(0, condParamCount)
     );
 

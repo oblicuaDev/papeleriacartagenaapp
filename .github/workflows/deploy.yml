@@ -13,46 +13,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Traer código
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      # 2. Verificar estructura (puedes quitar luego)
-      - name: Debug repo
-        run: |
-          ls -la
-
-      # 3. Instalar y build frontend
-      - name: Build frontend
-        run: |
-          npm install
-          npm run build
-
-      # 4. Verificar dist
-      - name: Verify build
-        run: |
-          ls -la dist
-
-      # 5. Copiar a VM
-      - name: Copy build to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "dist"
-          target: "/var/www/papeleria-cartagena/client"
-
-      # 6. Deploy backend
-      - name: Deploy via SSH
+      - name: Trigger deploy on VM
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /var/www/papeleria-cartagena/api
-            git pull origin main
-            npm ci --omit=dev
-            pm2 reload papeleria-api --update-env
-            sudo systemctl reload nginx
+            sudo bash /var/www/papeleria-cartagena/repo/infra/deploy-from-repo.sh --client

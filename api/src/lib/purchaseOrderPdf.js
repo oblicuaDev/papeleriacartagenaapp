@@ -12,9 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pool from '../config/db.js';
-
-const STORAGE_DIR  = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
-const STORAGE_URL  = process.env.STORAGE_BASE_URL   || 'http://localhost:3000/uploads';
+import { uploadBuffer } from './storage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -77,14 +75,14 @@ export async function loadOrderContext(orderId, db = pool) {
   return { order: orderRows[0], items };
 }
 
-// Construye el PDF y lo escribe en disco. Promesa resuelve con metadata.
-function renderPdf({ order, items, outputPath }) {
+// Construye el PDF en memoria y devuelve un Buffer.
+function renderPdfBuffer({ order, items }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'LETTER', margin: 50 });
-    const stream = fs.createWriteStream(outputPath);
-    stream.on('error', reject);
-    stream.on('finish', () => resolve());
-    doc.pipe(stream);
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('error', reject);
+    doc.on('end',   () => resolve(Buffer.concat(chunks)));
 
     // ── Header con logo + nombre empresa ─────────────────────
     const headerTop = doc.y;
@@ -240,22 +238,23 @@ export async function ensurePurchaseOrderPdf(orderId, generatedBy, db = pool) {
   }
 
   const { order, items } = await loadOrderContext(orderId, db);
-
-  fs.mkdirSync(STORAGE_DIR, { recursive: true });
   const safeId   = orderId.replace(/[^a-z0-9_-]/gi, '_');
-  const filename = `orden_compra_${safeId}_${Date.now()}.pdf`;
-  const filePath = path.join(STORAGE_DIR, filename);
+  const fileName = `orden_compra_${safeId}_${Date.now()}.pdf`;
 
-  await renderPdf({ order, items, outputPath: filePath });
-  const stat = fs.statSync(filePath);
+  const buffer = await renderPdfBuffer({ order, items });
+  const { url: fileUrl, size } = await uploadBuffer({
+    buffer,
+    originalName: fileName,
+    mimeType:     'application/pdf',
+    prefix:       `orders/${orderId}`,
+  });
 
-  const fileUrl = `${STORAGE_URL}/${filename}`;
   const { rows } = await db.query(
     `INSERT INTO order_attachments
        (order_id, file_name, file_size, mime_type, file_url, type, uploaded_by)
      VALUES ($1, $2, $3, 'application/pdf', $4, 'purchase_order', $5)
      RETURNING id`,
-    [orderId, `Orden de compra ${orderId}.pdf`, stat.size, fileUrl, generatedBy]
+    [orderId, `Orden de compra ${orderId}.pdf`, size, fileUrl, generatedBy]
   );
 
   return { created: true, attachmentId: rows[0].id, fileUrl };

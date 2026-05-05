@@ -1,45 +1,25 @@
 import { Router } from 'express';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { resolvePriceListId, priceSqlFragment } from '../lib/pricing.js';
+import { uploadBuffer, deleteObject } from '../lib/storage.js';
 
 const router = Router();
 router.use(requireAuth);
 
-// ── Image upload (multer) ───────────────────────────────────
+// ── Image upload (multer en memoria → GCS) ──────────────────
 const IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const IMAGE_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 
-const productImageStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    const base = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
-    const dir = path.join(base, 'products');
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const name = `product_${Date.now()}_${Math.round(Math.random() * 1e6)}${ext}`;
-    cb(null, name);
-  },
-});
-
 const uploadProductImage = multer({
-  storage: productImageStorage,
-  limits: { fileSize: IMAGE_MAX_SIZE },
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: IMAGE_MAX_SIZE },
   fileFilter: (_req, file, cb) => {
     if (IMAGE_MIME.includes(file.mimetype)) cb(null, true);
     else cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'Tipo de imagen no permitido'));
   },
 });
-
-function publicImageUrl(filename) {
-  const baseUrl = process.env.STORAGE_BASE_URL || 'http://localhost:3000/uploads';
-  return `${baseUrl}/products/${filename}`;
-}
 
 // Resuelve la lista aplicable al request:
 //   admin/advisor con ?priceListId  -> override explicito
@@ -280,22 +260,19 @@ router.post('/:id/image', requireRole('admin'), (req, res) => {
 
     try {
       const { rows: prod } = await pool.query(`SELECT image_url FROM products WHERE id = $1`, [id]);
-      if (!prod[0]) {
-        fs.unlink(req.file.path, () => { });
-        return res.status(404).json({ error: 'Producto no encontrado' });
-      }
+      if (!prod[0]) return res.status(404).json({ error: 'Producto no encontrado' });
 
-      const newUrl = publicImageUrl(req.file.filename);
+      const { url: newUrl } = await uploadBuffer({
+        buffer:       req.file.buffer,
+        originalName: req.file.originalname,
+        mimeType:     req.file.mimetype,
+        prefix:       'products',
+      });
+
       await pool.query(`UPDATE products SET image_url = $1 WHERE id = $2`, [newUrl, id]);
 
-      // Eliminar archivo anterior si existía y vivía en nuestro storage
-      const oldUrl = prod[0].image_url;
-      if (oldUrl && oldUrl.includes('/products/')) {
-        const oldName = path.basename(oldUrl);
-        const localBase = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
-        const oldPath = path.join(localBase, 'products', oldName);
-        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-      }
+      // Borrar imagen anterior si vivía en nuestro bucket
+      try { await deleteObject(prod[0].image_url); } catch (e) { console.warn('GCS delete:', e.message); }
 
       return res.json({ id, imageUrl: newUrl });
     } catch (dbErr) {
@@ -314,13 +291,7 @@ router.delete('/:id/image', requireRole('admin'), async (req, res) => {
 
     const oldUrl = rows[0].image_url;
     await pool.query(`UPDATE products SET image_url = NULL WHERE id = $1`, [id]);
-
-    if (oldUrl && oldUrl.includes('/products/')) {
-      const oldName = path.basename(oldUrl);
-      const localBase = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
-      const oldPath = path.join(localBase, 'products', oldName);
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-    }
+    try { await deleteObject(oldUrl); } catch (e) { console.warn('GCS delete:', e.message); }
     return res.json({ id, imageUrl: null });
   } catch (err) {
     console.error(err);

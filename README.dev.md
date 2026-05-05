@@ -62,12 +62,30 @@ Abre el navegador en: **http://localhost:5173**
 
 ## Credenciales de prueba
 
-| Rol                | Email                              | Contraseña   |
-|--------------------|------------------------------------|--------------|
-| Admin              | admin@papeleriacartagena.com       | ***REMOVED***   |
-| Asesor             | asesor@papeleriacartagena.com      | ***REMOVED***  |
-| Supervisor         | supervisor@elcentro.com            | ***REMOVED***   |
-| Creador de pedidos | pedidos@elcentro.com               | ***REMOVED*** |
+| Rol | Email | Contraseña |
+| --- | ----- | ---------- |
+
+─── Internos ──────────────────────────────────────
+admin@papeleriacartagena.com ***REMOVED***
+asesor@papeleriacartagena.com ***REMOVED*** (Cartagena)
+carlos@papeleriacartagena.com ***REMOVED*** (Bogotá)
+pedro@papeleriacartagena.com ***REMOVED*** (Cartagena)
+lucia@papeleriacartagena.com ***REMOVED*** (Bogotá)
+
+─── Papelería El Centro · Lista B (override Medellín → A) ───
+supervisor@elcentro.com ***REMOVED***
+pedidos@elcentro.com ***REMOVED***
+admin@elcentro.com ***REMOVED*** ← admin_empresa
+supervisor.medellin@elcentro.com ***REMOVED***
+pedidos.medellin@elcentro.com ***REMOVED***
+
+─── Distribuciones Norte · Lista C ────────────────
+supervisor@distnorte.com ***REMOVED***
+pedidos@distnorte.com ***REMOVED***
+
+─── Colegio San Andrés · Lista A ──────────────────
+rectoria@colegiosanandres.edu.co ***REMOVED***
+compras@colegiosanandres.edu.co ***REMOVED***
 
 ---
 
@@ -108,10 +126,10 @@ al backend en `localhost:3000`, sin CORS y sin cambiar ningún archivo fuente.
 
 ## Diferencias dev vs producción
 
-| | Desarrollo | Producción |
-|--|-----------|------------|
-| Frontend | Vite dev server (:5173) | Nginx sirve dist/ estático |
-| API | Node directo (:3000) | PM2 + Nginx proxy |
-| DB | `papeleria_db_dev` local | `papeleria_db` en VM GCP |
-| JWT secret | `dev_secret_...` (en .env.local) | secret aleatorio (en VM) |
-| Uploads | `./api/uploads/` | `/var/www/papeleria-cartagena/uploads/` |
+|            | Desarrollo                       | Producción                              |
+| ---------- | -------------------------------- | --------------------------------------- |
+| Frontend   | Vite dev server (:5173)          | Nginx sirve dist/ estático              |
+| API        | Node directo (:3000)             | PM2 + Nginx proxy                       |
+| DB         | `papeleria_db_dev` local         | `papeleria_db` en VM GCP                |
+| JWT secret | `dev_secret_...` (en .env.local) | secret aleatorio (en VM)                |
+| Uploads    | `./api/uploads/`                 | `/var/www/papeleria-cartagena/uploads/` |

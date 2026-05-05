@@ -1,9 +1,8 @@
 import { Router } from 'express';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { uploadBuffer, deleteObject } from '../lib/storage.js';
 
 // Montado en /orders/:orderId/attachments
 const router = Router({ mergeParams: true });
@@ -18,28 +17,12 @@ const ALLOWED_MIME = [
 ];
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    const dir = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (_req, file, cb) => {
-    const ext  = path.extname(file.originalname);
-    const base = path.basename(file.originalname, ext).replace(/[^a-z0-9_-]/gi, '_');
-    cb(null, `${base}_${Date.now()}${ext}`);
-  },
-});
-
 const upload = multer({
-  storage,
-  limits: { fileSize: MAX_SIZE },
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: MAX_SIZE },
   fileFilter: (_req, file, cb) => {
-    if (ALLOWED_MIME.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'Tipo de archivo no permitido'));
-    }
+    if (ALLOWED_MIME.includes(file.mimetype)) cb(null, true);
+    else cb(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'Tipo de archivo no permitido'));
   },
 });
 
@@ -89,14 +72,19 @@ router.post('/', requireRole('admin', 'advisor', 'delivery'), (req, res) => {
         return res.status(403).json({ error: 'Pedido asignado a otro asesor' });
       }
 
-      const baseUrl = process.env.STORAGE_BASE_URL || 'http://localhost:3000/uploads';
-      const fileUrl = `${baseUrl}/${req.file.filename}`;
+      // Subir buffer a GCS
+      const { url: fileUrl, size } = await uploadBuffer({
+        buffer:       req.file.buffer,
+        originalName: req.file.originalname,
+        mimeType:     req.file.mimetype,
+        prefix:       `orders/${orderId}`,
+      });
 
       const { rows } = await pool.query(
         `INSERT INTO order_attachments
            (order_id, file_name, file_size, mime_type, file_url, type, uploaded_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [orderId, req.file.originalname, req.file.size, req.file.mimetype, fileUrl, attachType, req.user.id]
+        [orderId, req.file.originalname, size, req.file.mimetype, fileUrl, attachType, req.user.id]
       );
 
       const { rows: userRows } = await pool.query(`SELECT name FROM users WHERE id = $1`, [req.user.id]);
@@ -169,11 +157,8 @@ router.delete('/:attachmentId', requireRole('admin', 'advisor'), async (req, res
       return res.status(403).json({ error: 'Solo el autor o admin puede eliminar este adjunto' });
     }
 
-    // Eliminar archivo físico si existe
-    const localPath = process.env.STORAGE_LOCAL_PATH || '/var/www/papeleria-cartagena/uploads';
-    const filename  = path.basename(rows[0].file_url);
-    const filePath  = path.join(localPath, filename);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    // Borrar el objeto del bucket (no-op si la URL no pertenece al bucket)
+    try { await deleteObject(rows[0].file_url); } catch (e) { console.warn('GCS delete:', e.message); }
 
     await pool.query(`DELETE FROM order_attachments WHERE id = $1`, [attachmentId]);
     return res.json({ message: 'Adjunto eliminado' });

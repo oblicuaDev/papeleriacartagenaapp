@@ -7,6 +7,8 @@
 
 ---
 
+try again
+
 ## Setup inicial (solo la primera vez)
 
 ### 1. Crear base de datos local

@@ -12,7 +12,7 @@
 #
 # Flags:
 #   --client        construye y publica tambien el frontend
-#   --client-only   solo frontend (no toca API ni PM2)
+#   --client-only   solo frontend (no toca API ni)
 #   --skip-pull     no ejecuta `git pull` (para deploys manuales tras edicion local)
 #   --no-backup     omite el backup de api/src (NO recomendado)
 # =============================================================
@@ -21,7 +21,6 @@ set -euo pipefail
 REPO="/var/www/papeleria-cartagena/repo"
 APP_API="/var/www/papeleria-cartagena/api"
 APP_CLIENT="/var/www/papeleria-cartagena/client"
-PM2_PROCESS="papeleria-api"
 
 # ── Parse flags ─────────────────────────────────────────────
 DO_API=1
@@ -118,43 +117,31 @@ if [ "$DO_CLIENT" = "1" ]; then
 else
   echo "[5/6] Frontend skip (usa --client si lo necesitas)"
 fi
-
-# ── 6. Reload PM2 ───────────────────────────────────────────
-# Detecta el usuario UNIX dueno del daemon PM2 que tiene registrado el proceso.
-# Necesario porque setup-vm.sh registro PM2 bajo root, pero alguien pudo
-# tambien arrancarlo bajo el usuario interactivo.
+# ── 6. Reload systemd ───────────────────────────────────────
 if [ "$DO_API" = "1" ]; then
-  echo "[6/6] pm2 reload $PM2_PROCESS..."
+  echo "[6/6] systemd restart papeleria-api..."
 
-  PM2_OWNER=""
-  for u in root $(logname 2>/dev/null) $(stat -c '%U' "$APP_API" 2>/dev/null) www-data; do
-    [ -z "$u" ] && continue
-    if sudo -u "$u" pm2 jlist 2>/dev/null | grep -q "\"name\":\"$PM2_PROCESS\""; then
-      PM2_OWNER="$u"
-      break
-    fi
-  done
+  sudo systemctl restart papeleria-api
 
-  if [ -z "$PM2_OWNER" ]; then
-    echo "    ERROR: no se encontro $PM2_PROCESS en ningun daemon PM2."
-    echo "    Verifica con:  pm2 list   y   sudo pm2 list"
-    echo "    Para registrarlo manualmente (ajusta el path al entrypoint):"
-    echo "      sudo -u root pm2 start $APP_API/src/app.js --name $PM2_PROCESS"
-    echo "      sudo -u root pm2 save"
+  echo "    Estado:"
+  sudo systemctl status papeleria-api --no-pager -l | head -n 20
+
+  echo "    Health check..."
+  sleep 2
+
+  if curl -sf http://localhost:3000/health >/dev/null 2>&1; then
+    echo "    API OK"
+  else
+    echo "    WARNING: API no responde"
+    sudo journalctl -u papeleria-api --no-pager -n 50
     exit 1
   fi
-
-  echo "    Daemon PM2 encontrado bajo usuario: $PM2_OWNER"
-  sudo -u "$PM2_OWNER" pm2 reload "$PM2_PROCESS" --update-env
-  sleep 1
-  sudo -u "$PM2_OWNER" pm2 logs "$PM2_PROCESS" --lines 20 --nostream || true
 else
-  echo "[6/6] PM2 skip"
+  echo "[6/6] systemd skip"
 fi
-
 echo ""
 echo "======================================"
 echo " Deploy OK"
-[ "$DO_API"    = "1" ] && [ "$DO_BACKUP" = "1" ] && echo " Rollback API: sudo rm -rf $APP_API/src && sudo mv $APP_API/src.bak.$TS $APP_API/src && pm2 reload $PM2_PROCESS"
+[ "$DO_API"    = "1" ] && [ "$DO_BACKUP" = "1" ] && echo " Rollback API: sudo rm -rf $APP_API/src && sudo mv $APP_API/src.bak.$TS $APP_API/src"
 [ "$DO_CLIENT" = "1" ] && echo " Rollback frontend: re-deploy una version anterior"
 echo "======================================"

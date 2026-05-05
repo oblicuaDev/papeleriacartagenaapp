@@ -13,6 +13,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Debug build
+        run: |
+          echo "=== ROOT ==="
+          ls -la
+
+          echo "=== PACKAGE.JSON ==="
+          cat package.json || echo "no hay package.json en root"
+
+          echo "=== DIST ==="
+          ls -la dist || echo "dist no existe"
       - name: Checkout repo
         uses: actions/checkout@v4
       - name: Copy frontend (dist)

@@ -30,7 +30,7 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "frontend/dist/*"
+          source: "dist/*"
           target: "/var/www/papeleria-cartagena/client"
 
       - name: Deploy via SSH

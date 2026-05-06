@@ -22,7 +22,7 @@ export const LOGO_PATH =
   process.env.LOGO_PATH ||
   path.resolve(__dirname, '../../assets/logo-cartagena.jpg');
 
-const COMPANY_NAME    = 'Papelería Cartagena';
+const COMPANY_NAME = 'Papelería Cartagena';
 const COMPANY_TAGLINE = 'Suministros de papelería y oficina';
 
 function formatCOP(amount) {
@@ -82,7 +82,7 @@ function renderPdfBuffer({ order, items }) {
     const chunks = [];
     doc.on('data', (c) => chunks.push(c));
     doc.on('error', reject);
-    doc.on('end',   () => resolve(Buffer.concat(chunks)));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
 
     // ── Header con logo + nombre empresa ─────────────────────
     const headerTop = doc.y;
@@ -100,26 +100,26 @@ function renderPdfBuffer({ order, items }) {
     const titleX = logoEmbedded ? 130 : 50;
     const titleW = 562 - titleX;
     doc.font('Helvetica-Bold').fontSize(16).fillColor('#1E40AF')
-       .text(COMPANY_NAME, titleX, headerTop + 4, { width: titleW });
+      .text(COMPANY_NAME, titleX, headerTop + 4, { width: titleW });
     doc.font('Helvetica').fontSize(9).fillColor('#666666')
-       .text(COMPANY_TAGLINE, titleX, doc.y, { width: titleW });
+      .text(COMPANY_TAGLINE, titleX, doc.y, { width: titleW });
     doc.fillColor('#000000');
 
     // Línea separadora bajo el header
     const headerBottom = headerTop + 60;
     doc.moveTo(50, headerBottom).lineTo(562, headerBottom)
-       .strokeColor('#1E40AF').lineWidth(1.2).stroke();
+      .strokeColor('#1E40AF').lineWidth(1.2).stroke();
     doc.lineWidth(1).strokeColor('#000000');
     doc.y = headerBottom + 12;
 
     // ── Título del documento ─────────────────────────────────
     doc.font('Helvetica-Bold').fontSize(18)
-       .text('ORDEN DE COMPRA', { align: 'center' });
+      .text('ORDEN DE COMPRA', { align: 'center' });
     doc.font('Helvetica-Bold').fontSize(12)
-       .text(order.id, { align: 'center' });
+      .text(order.id, { align: 'center' });
     doc.moveDown(0.3);
     doc.font('Helvetica').fontSize(9).fillColor('#666666')
-       .text(`Generada: ${formatDate(new Date())}`, { align: 'center' });
+      .text(`Generada: ${formatDate(new Date())}`, { align: 'center' });
     doc.fillColor('#000000');
     doc.moveDown(1.2);
 
@@ -129,7 +129,7 @@ function renderPdfBuffer({ order, items }) {
     doc.moveDown(0.3);
     doc.font('Helvetica').fontSize(10);
     if (order.company_name) doc.text(`Empresa: ${order.company_name}`);
-    if (order.company_nit)  doc.text(`NIT: ${order.company_nit}`);
+    if (order.company_nit) doc.text(`NIT: ${order.company_nit}`);
     if (order.sucursal_name) {
       const loc = [order.sucursal_name, order.sucursal_city].filter(Boolean).join(' - ');
       doc.text(`Sucursal: ${loc}`);
@@ -156,15 +156,15 @@ function renderPdfBuffer({ order, items }) {
     doc.moveDown(0.3);
 
     const colX = { sku: 50, name: 130, qty: 360, price: 410, total: 490 };
-    const colW = { sku: 70,  name: 220, qty: 40,  price: 70,  total: 70  };
+    const colW = { sku: 70, name: 220, qty: 40, price: 70, total: 70 };
 
     let y = doc.y;
     doc.font('Helvetica-Bold').fontSize(9);
-    doc.text('SKU',       colX.sku,   y, { width: colW.sku });
-    doc.text('Producto',  colX.name,  y, { width: colW.name });
-    doc.text('Cant',      colX.qty,   y, { width: colW.qty,   align: 'right' });
-    doc.text('P. Unit',   colX.price, y, { width: colW.price, align: 'right' });
-    doc.text('Subtotal',  colX.total, y, { width: colW.total, align: 'right' });
+    doc.text('SKU', colX.sku, y, { width: colW.sku });
+    doc.text('Producto', colX.name, y, { width: colW.name });
+    doc.text('Cant', colX.qty, y, { width: colW.qty, align: 'right' });
+    doc.text('P. Unit', colX.price, y, { width: colW.price, align: 'right' });
+    doc.text('Subtotal', colX.total, y, { width: colW.total, align: 'right' });
     y += 14;
     doc.moveTo(50, y).lineTo(562, y).strokeColor('#999999').stroke();
     y += 4;
@@ -181,11 +181,11 @@ function renderPdfBuffer({ order, items }) {
         y = 50;
       }
 
-      doc.text(it.sku ?? '',      colX.sku,   y, { width: colW.sku });
-      doc.text(it.product_name,   colX.name,  y, { width: colW.name });
-      doc.text(String(it.quantity), colX.qty,   y, { width: colW.qty,   align: 'right' });
+      doc.text(it.sku ?? '', colX.sku, y, { width: colW.sku });
+      doc.text(it.product_name, colX.name, y, { width: colW.name });
+      doc.text(String(it.quantity), colX.qty, y, { width: colW.qty, align: 'right' });
       doc.text(formatCOP(it.unit_price), colX.price, y, { width: colW.price, align: 'right' });
-      doc.text(formatCOP(subtotal),      colX.total, y, { width: colW.total, align: 'right' });
+      doc.text(formatCOP(subtotal), colX.total, y, { width: colW.total, align: 'right' });
 
       // Avanzar segun la altura del nombre (puede ocupar varias lineas)
       const lineCount = Math.max(1, Math.ceil(doc.widthOfString(it.product_name) / colW.name));
@@ -197,23 +197,47 @@ function renderPdfBuffer({ order, items }) {
     doc.moveTo(360, y).lineTo(562, y).strokeColor('#000000').stroke();
     y += 6;
     doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('TOTAL',                      colX.price - 10, y, { width: 80, align: 'right' });
+    doc.text('TOTAL', 360, y, { width: 100, align: 'right' });
     doc.text(formatCOP(order.total ?? computedTotal), colX.total, y, { width: colW.total, align: 'right' });
     y += 20;
 
     // ── Notas ───────────────────────────────────────────────
+    // ── Notas ───────────────────────────────────────────────
     if (order.notes) {
-      doc.moveDown(1.5);
-      doc.font('Helvetica-Bold').fontSize(11).text('OBSERVACIONES');
-      doc.moveTo(50, doc.y).lineTo(562, doc.y).strokeColor('#cccccc').stroke();
-      doc.moveDown(0.3);
-      doc.font('Helvetica').fontSize(10).text(order.notes, { width: 512 });
+      y += 20;
+
+      // Reiniciar posicion X/Y correctamente
+      doc.x = 50;
+      doc.y = y;
+
+      doc.font('Helvetica-Bold')
+        .fontSize(11)
+        .text('OBSERVACIONES', 50, y);
+
+      y = doc.y + 2;
+
+      doc.moveTo(50, y)
+        .lineTo(562, y)
+        .strokeColor('#cccccc')
+        .stroke();
+
+      y += 8;
+
+      doc.font('Helvetica')
+        .fontSize(10)
+        .fillColor('#000000')
+        .text(order.notes, 50, y, {
+          width: 512,
+          align: 'left'
+        });
+
+      y = doc.y;
     }
 
     // ── Footer ──────────────────────────────────────────────
     doc.font('Helvetica').fontSize(8).fillColor('#888888');
     doc.text(`Documento generado automaticamente por Papeleria Cartagena`,
-             50, 760, { width: 512, align: 'center' });
+      50, 760, { width: 512, align: 'center' });
 
     doc.end();
   });
@@ -238,15 +262,15 @@ export async function ensurePurchaseOrderPdf(orderId, generatedBy, db = pool) {
   }
 
   const { order, items } = await loadOrderContext(orderId, db);
-  const safeId   = orderId.replace(/[^a-z0-9_-]/gi, '_');
+  const safeId = orderId.replace(/[^a-z0-9_-]/gi, '_');
   const fileName = `orden_compra_${safeId}_${Date.now()}.pdf`;
 
   const buffer = await renderPdfBuffer({ order, items });
   const { url: fileUrl, size } = await uploadBuffer({
     buffer,
     originalName: fileName,
-    mimeType:     'application/pdf',
-    prefix:       `orders/${orderId}`,
+    mimeType: 'application/pdf',
+    prefix: `orders/${orderId}`,
   });
 
   const { rows } = await db.query(

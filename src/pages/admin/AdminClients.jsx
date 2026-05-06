@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, X, Phone, MapPin, Calendar, Building, GitBranch } from 'lucide-react';
+import { Plus, X, Phone, MapPin, Calendar, Building, GitBranch, Info } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { usersApi } from '../../services/api';
 
@@ -21,7 +21,7 @@ function Modal({ title, onClose, children }) {
 
 const EMPTY_FORM = {
   name: '', contactName: '', email: '', password: '', phone: '', address: '',
-  priceListId: 1, companyId: '', sucursalId: '', clientRole: 'creador_pedidos',
+  companyId: '', sucursalId: '', clientRole: 'creador_pedidos',
 };
 
 export default function AdminClients() {
@@ -31,8 +31,13 @@ export default function AdminClients() {
 
   const clients = users.filter(u => u.role === 'client');
 
-  function getPriceListName(id) {
-    return priceLists.find(pl => pl.id === id)?.name || '—';
+  // Lista heredada: sucursal -> empresa -> nada
+  function getInheritedPriceList(client) {
+    if (!client.companyId) return null;
+    const company = companies.find(c => c.id === client.companyId);
+    const sucursal = company?.sucursales?.find(s => s.id === client.sucursalId);
+    const id = sucursal?.priceListId || company?.priceListId || null;
+    return id ? priceLists.find(pl => pl.id === id) : null;
   }
 
   function getCompanyName(id) {
@@ -67,7 +72,6 @@ export default function AdminClients() {
       password:    form.password,
       phone:       form.phone,
       address:     form.address,
-      priceListId: Number(form.priceListId),
       companyId:   form.companyId ? Number(form.companyId) : null,
       sucursalId:  form.sucursalId ? Number(form.sucursalId) : null,
       clientRole:  form.clientRole,
@@ -159,9 +163,16 @@ export default function AdminClients() {
                     )}
                   </td>
                   <td className="px-5 py-4">
-                    <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full font-medium">
-                      {getPriceListName(client.priceListId)}
-                    </span>
+                    {(() => {
+                      const inherited = getInheritedPriceList(client);
+                      return inherited ? (
+                        <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-full font-medium">
+                          {inherited.name}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">— Precio base —</span>
+                      );
+                    })()}
                   </td>
                   <td className="px-5 py-4">
                     {client.address ? (
@@ -253,11 +264,12 @@ export default function AdminClients() {
               <label className={labelClass}>Dirección</label>
               <input className={inputClass} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Cra 10 # 5-23, Bogotá" />
             </div>
-            <div>
-              <label className={labelClass}>Lista de Precios</label>
-              <select className={inputClass} value={form.priceListId} onChange={e => setForm(f => ({ ...f, priceListId: e.target.value }))}>
-                {priceLists.map(pl => <option key={pl.id} value={pl.id}>{pl.name} — {pl.description}</option>)}
-              </select>
+            <div className="flex items-start gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-600">
+              <Info className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
+              <span>
+                La <strong>lista de precios</strong> se hereda automáticamente desde la sucursal o empresa asignada.
+                No es necesario configurarla manualmente.
+              </span>
             </div>
             <div>
               <label className={labelClass}>Rol del usuario *</label>

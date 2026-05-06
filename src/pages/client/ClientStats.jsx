@@ -1,7 +1,30 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, TrendingUp, Package, Users, Calendar, AlertCircle } from 'lucide-react';
+import { BarChart3, TrendingUp, Package, Users, Calendar, AlertCircle, Download, Filter } from 'lucide-react';
 import { statsApi } from '../../services/api';
-import { formatCOP, STATUS_STYLES } from '../../data/mockData';
+import { useAuth } from '../../context/AuthContext';
+import { useApp } from '../../context/AppContext';
+import { formatCOP, STATUS_STYLES, statusLabel } from '../../data/mockData';
+
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
+
+async function downloadStatsExport({ format = 'xlsx', sucursalId } = {}) {
+  const token = localStorage.getItem('pc_token');
+  const url = new URL(`${API_BASE}/stats/orders/export`, window.location.origin);
+  url.searchParams.set('format', format);
+  if (sucursalId) url.searchParams.set('sucursalId', sucursalId);
+  const res = await fetch(url.toString().replace(window.location.origin, ''), {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Export fallo: HTTP ${res.status}`);
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `estadisticas_${new Date().toISOString().slice(0, 10)}.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
 
 function StatCard({ icon: Icon, label, value, accent = 'blue' }) {
   const accents = {
@@ -24,18 +47,39 @@ function StatCard({ icon: Icon, label, value, accent = 'blue' }) {
 }
 
 export default function ClientStats() {
+  const { currentUser } = useAuth();
+  const { companies } = useApp();
   const [stats, setStats]     = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
+  const [sucursalFilter, setSucursalFilter] = useState('');
+  const [exporting, setExporting] = useState(false);
+
+  const isAdminEmpresa = currentUser?.clientRole === 'admin_empresa';
+  const company = isAdminEmpresa ? companies.find(c => c.id === currentUser?.companyId) : null;
+  const sucursales = company?.sucursales || [];
 
   useEffect(() => {
     let cancelled = false;
-    statsApi.client()
+    setLoading(true);
+    const params = sucursalFilter ? { sucursalId: sucursalFilter } : {};
+    statsApi.client(params)
       .then(s => { if (!cancelled) setStats(s); })
       .catch(err => { if (!cancelled) setError(err?.message || 'Error cargando estadisticas'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [sucursalFilter]);
+
+  async function handleExportExcel() {
+    setExporting(true);
+    try {
+      await downloadStatsExport({ format: 'xlsx', sucursalId: sucursalFilter });
+    } catch (err) {
+      alert(err?.message || 'No se pudo exportar');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   if (loading) {
     return <p className="text-sm text-gray-400 py-12 text-center">Cargando estadisticas...</p>;
@@ -60,16 +104,55 @@ export default function ClientStats() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-blue-100 text-blue-700 rounded-xl flex items-center justify-center">
-          <BarChart3 className="w-5 h-5" />
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-blue-100 text-blue-700 rounded-xl flex items-center justify-center">
+            <BarChart3 className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Estadisticas</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {isCompanyScope ? 'Resumen de pedidos de tu empresa' : 'Resumen de tus pedidos'}
+              {sucursalFilter && sucursales.find(s => s.id === Number(sucursalFilter)) && (
+                <span className="ml-2 text-blue-700 font-medium">
+                  · {sucursales.find(s => s.id === Number(sucursalFilter))?.name}
+                </span>
+              )}
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Estadisticas</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {isCompanyScope ? 'Resumen de pedidos de tu empresa' : 'Resumen de tus pedidos'}
-          </p>
-        </div>
+
+        {/* Filtro sede + export Excel — solo admin_empresa */}
+        {isAdminEmpresa && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {sucursales.length > 0 && (
+              <div className="relative">
+                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+                <select
+                  value={sucursalFilter}
+                  onChange={e => setSucursalFilter(e.target.value)}
+                  className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[200px]"
+                >
+                  <option value="">Todas las sedes</option>
+                  {sucursales.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}{s.city ? ` — ${s.city}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <button
+              onClick={handleExportExcel}
+              disabled={exporting}
+              className="flex items-center gap-1.5 px-4 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-sm text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition font-medium"
+              title="Exportar a Excel"
+            >
+              <Download className="w-4 h-4" />
+              {exporting ? 'Generando...' : 'Exportar Excel'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* KPI cards */}
@@ -95,7 +178,7 @@ export default function ClientStats() {
                   <li key={status}>
                     <div className="flex items-center justify-between mb-1">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${style.bg} ${style.text}`}>
-                        {status}
+                        {statusLabel(status)}
                       </span>
                       <span className="text-sm font-semibold text-gray-700">{count}</span>
                     </div>

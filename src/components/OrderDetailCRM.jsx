@@ -38,7 +38,7 @@ import {
   ArrowRight,
   FileBadge,
 } from "lucide-react";
-import { STATUS_STYLES, ORDER_STATUSES, formatCOP } from "../data/mockData";
+import { STATUS_STYLES, ORDER_STATUSES, formatCOP, statusLabel } from "../data/mockData";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -133,6 +133,10 @@ export default function OrderDetailCRM({
 }) {
   // Si canAssign es true, también puede asignar repartidor.
   const showDeliveryAssign = canAssign || canAssignDelivery;
+  // El asesor NO cambia estados manualmente: flujo automatico (aprobado → asignado)
+  // y repartidor maneja el resto.
+  const isAdvisor = currentUser?.role === "advisor";
+  const canEditStatus = editable && !isAdvisor;
   const [status, setStatus] = useState(order.status);
   const [carrier, setCarrier] = useState(order.carrier || "");
   const [saved, setSaved] = useState(false);
@@ -164,9 +168,10 @@ export default function OrderDetailCRM({
   const advisors  = users.filter((u) => u.role === "advisor"  && u.active);
   const deliverers = users.filter((u) => u.role === "delivery" && u.active);
 
-  // PHASE 6: timeline cronologica del pedido
+  // Timeline cronologica del pedido. Se recarga ante cambios visibles.
   const [timeline, setTimeline] = useState(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setTimelineLoading(true);
@@ -184,10 +189,13 @@ export default function OrderDetailCRM({
     return () => {
       cancelled = true;
     };
-    // Recargar cuando cambia el status (despues de un save) o al subir adjunto/comentario
-  }, [order.id, status, localComments.length, localAttachments.length]);
-  const client = users.find((u) => u.id === order.clientId);
-  const advisor = users.find((u) => u.id === order.advisorId);
+  }, [order.id, localComments.length, localAttachments.length, timelineRefreshKey]);
+  // Preferir nombres ya enriquecidos por el backend (GET /orders/:id) y caer
+  // a la lista local de users si no vienen en el payload.
+  const client = users.find((u) => u.id === order.clientId)
+    || (order.clientName ? { id: order.clientId, name: order.clientName } : null);
+  const advisor = users.find((u) => u.id === order.advisorId)
+    || (order.advisorName ? { id: order.advisorId, name: order.advisorName } : null);
 
   function getSku(productId) {
     return products.find((p) => p.id === productId)?.sku || "—";
@@ -198,6 +206,22 @@ export default function OrderDetailCRM({
   const attachments = localAttachments;
 
   // ── Actions ──────────────────────────────────────────────────────────────
+
+  // Asignacion de asesor / repartidor: refresca timeline y comentarios
+  // porque el backend registra un comment de sistema cuando cambia delivery.
+  async function handleAssign(updates) {
+    try {
+      await updateOrder(order.id, updates);
+      // Recargar comentarios (la asignacion de repartidor inserta un comment de sistema)
+      try {
+        const fresh = await ordersApi.get(order.id);
+        if (Array.isArray(fresh?.comments)) setLocalComments(fresh.comments);
+      } catch {}
+      setTimelineRefreshKey((k) => k + 1);
+    } catch (err) {
+      alert(err?.message || "No se pudo asignar");
+    }
+  }
 
   const evidenceCount = (localAttachments || []).filter(
     (a) => a.type === "evidence",
@@ -222,6 +246,7 @@ export default function OrderDetailCRM({
     try {
       await updateOrder(order.id, updates);
       setSaved(true);
+      setTimelineRefreshKey((k) => k + 1);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
       setSaveError(err?.message || "No se pudo guardar el cambio");
@@ -368,7 +393,7 @@ export default function OrderDetailCRM({
                   <span
                     className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${style.bg} ${style.text} ${style.border}`}
                   >
-                    {order.status}
+                    {statusLabel(order.status)}
                   </span>
                 </div>
                 <div className="space-y-1 text-sm text-gray-500">
@@ -452,7 +477,8 @@ export default function OrderDetailCRM({
                 Gestión del pedido
               </h3>
 
-              {/* Status selector */}
+              {/* Status selector — oculto para advisor */}
+              {canEditStatus && (
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-2">
                   Estado
@@ -474,15 +500,22 @@ export default function OrderDetailCRM({
                         {isActive && (
                           <CheckCircle2 className="w-3 h-3 inline mr-1" />
                         )}
-                        {s}
+                        {statusLabel(s)}
                       </button>
                     );
                   })}
                 </div>
               </div>
+              )}
+
+              {isAdvisor && (
+                <div className="bg-blue-50 border border-blue-100 text-blue-800 text-xs rounded-lg px-3 py-2">
+                  Como asesor solo puedes asignar repartidor. El flujo de estados lo gestiona el repartidor automáticamente.
+                </div>
+              )}
 
               {/* Carrier field */}
-              {status === "En Ruta" && (
+              {canEditStatus && status === "En Ruta" && (
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">
                     Transportador
@@ -506,9 +539,7 @@ export default function OrderDetailCRM({
                   <select
                     value={order.advisorId || ""}
                     onChange={(e) =>
-                      updateOrder(order.id, {
-                        advisorId: Number(e.target.value) || null,
-                      })
+                      handleAssign({ advisorId: Number(e.target.value) || null })
                     }
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
@@ -532,13 +563,16 @@ export default function OrderDetailCRM({
                   <select
                     value={order.deliveryId || ""}
                     onChange={(e) =>
-                      updateOrder(order.id, {
+                      handleAssign({
                         deliveryId: e.target.value ? Number(e.target.value) : null,
                       })
                     }
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Sin asignar</option>
+                    {deliverers.length === 0 && (
+                      <option disabled>No hay repartidores disponibles</option>
+                    )}
                     {deliverers.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.name}
@@ -564,23 +598,25 @@ export default function OrderDetailCRM({
                 </div>
               )}
 
-              {/* Save button */}
-              <div className="flex items-center gap-4 pt-1">
-                <button
-                  onClick={handleSave}
-                  disabled={deliveryNeedsEvidence}
-                  className="flex items-center gap-2 px-5 py-2 bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-sm font-semibold hover:bg-blue-800 transition shadow-sm"
-                >
-                  <Save className="w-4 h-4" />
-                  Guardar cambios
-                </button>
-                {saved && (
-                  <span className="flex items-center gap-1.5 text-emerald-600 text-sm font-medium">
-                    <CheckCircle2 className="w-4 h-4" />
-                    Guardado
-                  </span>
-                )}
-              </div>
+              {/* Save button — solo si puede editar status */}
+              {canEditStatus && (
+                <div className="flex items-center gap-4 pt-1">
+                  <button
+                    onClick={handleSave}
+                    disabled={deliveryNeedsEvidence}
+                    className="flex items-center gap-2 px-5 py-2 bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-sm font-semibold hover:bg-blue-800 transition shadow-sm"
+                  >
+                    <Save className="w-4 h-4" />
+                    Guardar cambios
+                  </button>
+                  {saved && (
+                    <span className="flex items-center gap-1.5 text-emerald-600 text-sm font-medium">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Guardado
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -725,11 +761,11 @@ export default function OrderDetailCRM({
                               <>
                                 Cambio de{" "}
                                 <span className="font-medium">
-                                  {ev.payload.fromStatus}
+                                  {statusLabel(ev.payload.fromStatus)}
                                 </span>{" "}
                                 a{" "}
                                 <span className="font-medium">
-                                  {ev.payload.toStatus}
+                                  {statusLabel(ev.payload.toStatus)}
                                 </span>
                                 {ev.payload.reason && (
                                   <span className="text-gray-500">
@@ -742,7 +778,7 @@ export default function OrderDetailCRM({
                               <>
                                 Pedido creado en{" "}
                                 <span className="font-medium">
-                                  {ev.payload?.toStatus}
+                                  {statusLabel(ev.payload?.toStatus)}
                                 </span>
                               </>
                             ))}
@@ -989,7 +1025,7 @@ export default function OrderDetailCRM({
                 <span
                   className={`text-xs px-2 py-0.5 rounded-full font-medium ${style.bg} ${style.text}`}
                 >
-                  {order.status}
+                  {statusLabel(order.status)}
                 </span>
               </div>
               <div className="flex justify-between">

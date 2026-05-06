@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { Plus, X, Users, GitBranch, Edit2, Trash2, MapPin, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -26,6 +27,11 @@ const EMPTY_SUC_FORM   = { name: '', city: '', address: '' };
 export default function ClientManage() {
   const { currentUser } = useAuth();
   const { users, refreshUsers, companies, refreshCompanies } = useApp();
+
+  // Solo admin_empresa puede administrar empresas/sucursales/usuarios
+  if (currentUser && currentUser.clientRole !== 'admin_empresa') {
+    return <Navigate to="/cliente" replace />;
+  }
 
   const company = companies.find(c => c.id === currentUser?.companyId);
 

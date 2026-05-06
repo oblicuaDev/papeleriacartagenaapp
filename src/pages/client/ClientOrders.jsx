@@ -1,13 +1,41 @@
 import { useNavigate } from 'react-router-dom';
-import { Package, ExternalLink } from 'lucide-react';
+import { Package, ExternalLink, Repeat } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { STATUS_STYLES, formatCOP } from '../../data/mockData';
+import { STATUS_STYLES, formatCOP, statusLabel } from '../../data/mockData';
+import { ordersApi } from '../../services/api';
 
 export default function ClientOrders() {
-  const { orders, users } = useApp();
+  const { orders, users, products, addToCart, clearCart } = useApp();
   const { currentUser }   = useAuth();
   const navigate        = useNavigate();
+  const isReadOnly = currentUser?.clientRole === 'admin_empresa';
+
+  async function handleRepeatOrder(e, orderId) {
+    e.stopPropagation();
+    try {
+      const full = await ordersApi.get(orderId);
+      const items = full.items || [];
+      if (!items.length) {
+        alert('El pedido no tiene productos para repetir.');
+        return;
+      }
+      // Carga al carrito usando el precio actual del catalogo (no el snapshot)
+      clearCart();
+      let missing = 0;
+      for (const it of items) {
+        const product = products.find((p) => p.id === it.productId);
+        if (!product) { missing++; continue; }
+        addToCart(product, it.quantity, product.price);
+      }
+      if (missing > 0) {
+        alert(`${missing} producto(s) ya no están disponibles. Los demás se agregaron al carrito.`);
+      }
+      navigate('/cliente/confirmar-pedido');
+    } catch (err) {
+      alert(err?.message || 'No se pudo repetir el pedido');
+    }
+  }
 
   // Supervisors see all orders from their company's clients
   const isSupervisor = currentUser?.clientRole === 'supervisor';
@@ -66,17 +94,29 @@ export default function ClientOrders() {
                     <td className="px-5 py-4 text-sm font-semibold text-gray-800">{formatCOP(order.total)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>
-                        {order.status}
+                        {statusLabel(order.status)}
                       </span>
                     </td>
                     <td className="px-5 py-4">
-                      <button
-                        onClick={e => { e.stopPropagation(); navigate(`/cliente/pedidos/${order.id}`); }}
-                        className="flex items-center gap-1 text-xs text-blue-700 font-medium hover:text-blue-800 transition"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Ver detalle
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={e => { e.stopPropagation(); navigate(`/cliente/pedidos/${order.id}`); }}
+                          className="flex items-center gap-1 text-xs text-blue-700 font-medium hover:text-blue-800 transition"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Ver detalle
+                        </button>
+                        {!isReadOnly && (
+                          <button
+                            onClick={e => handleRepeatOrder(e, order.id)}
+                            title="Repetir este pedido"
+                            className="flex items-center gap-1 text-xs text-emerald-700 font-medium hover:text-emerald-800 transition"
+                          >
+                            <Repeat className="w-3.5 h-3.5" />
+                            Repetir
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

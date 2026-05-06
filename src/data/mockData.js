@@ -143,9 +143,25 @@ export const INITIAL_PRODUCTS = [
 // =====================
 export const ORDER_STATUSES = ['Pendiente', 'Validar disponibilidad', 'Alistamiento', 'En Ruta', 'Entregado'];
 
+// Label visible al usuario (estado interno → texto en UI)
+export const STATUS_LABELS = {
+  'Pendiente por aprobar': 'Pendiente por aprobar',
+  'Pendiente':             'Aprobado',
+  'Rechazado':             'Rechazado',
+  'Validar disponibilidad':'Validar disponibilidad',
+  'Alistamiento':          'Alistamiento',
+  'En Ruta':               'En Ruta',
+  'Entregado':             'Entregado',
+};
+
+export function statusLabel(status) {
+  return STATUS_LABELS[status] || status;
+}
+
 export const STATUS_STYLES = {
   'Pendiente por aprobar': { bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-200' },
-  'Pendiente': { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-200' },
+  'Pendiente': { bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-200' },
+  'Rechazado': { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200' },
   'Validar disponibilidad': { bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-200' },
   'Alistamiento': { bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-200' },
   'En Ruta': { bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-200' },

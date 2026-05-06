@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { resolvePriceListId, priceSqlFragment } from '../lib/pricing.js';
+import { resolvePriceListChain, priceSqlFragmentChain } from '../lib/pricing.js';
 import { uploadBuffer, deleteObject } from '../lib/storage.js';
 
 const router = Router();
@@ -21,14 +21,14 @@ const uploadProductImage = multer({
   },
 });
 
-// Resuelve la lista aplicable al request:
-//   admin/advisor con ?priceListId  -> override explicito
-//   client                          -> company.price_list_id > user.price_list_id
-async function resolveListForRequest(req) {
+// Resuelve la cadena de listas aplicable al request:
+//   admin/advisor con ?priceListId  -> override explicito (lista unica)
+//   client                          -> [sucursal, company, user] sin nulls
+async function resolveChainForRequest(req) {
   const { role, id: userId, companyId } = req.user;
   const override =
     (role === 'admin' || role === 'advisor') ? req.query.priceListId : undefined;
-  return resolvePriceListId({ companyId, userId, override });
+  return resolvePriceListChain({ companyId, userId, override });
 }
 
 // GET /products
@@ -57,23 +57,26 @@ router.get('/', async (req, res) => {
   const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
   try {
-    const priceListId = await resolveListForRequest(req);
+    const chain = await resolveChainForRequest(req);
+    const priceListId = chain[0] || null;
 
-    // Params order: [...condParams, priceListId, limitNum, offset]
-    const listIdx = condParams.length + 1;
-    const limitIdx = condParams.length + 2;
-    const offsetIdx = condParams.length + 3;
-    const mainParams = [...condParams, priceListId, limitNum, offset];
+    // Params: [...condParams, ...chain, limit, offset]
+    const chainStart = condParams.length + 1;
+    const listIdParams = chain.map((_, i) => `$${chainStart + i}`);
+    const primaryListSqlValue = chain.length ? listIdParams[0] : 'NULL';
+    const limitIdx  = condParams.length + chain.length + 1;
+    const offsetIdx = condParams.length + chain.length + 2;
+    const mainParams = [...condParams, ...chain, limitNum, offset];
 
-    const { select: priceSelect, join: priceJoin } = priceSqlFragment({
+    const { select: priceSelect, join: priceJoin } = priceSqlFragmentChain({
       alias: 'p',
-      listIdParam: `$${listIdx}`,
+      listIdParams,
     });
 
     const { rows } = await pool.query(
       `SELECT p.*, c.name AS category_name,
          ${priceSelect} AS price,
-         $${listIdx}::int AS price_list_id,
+         ${primaryListSqlValue}::int AS price_list_id,
          COALESCE(
            ARRAY(
              SELECT complementary_id FROM product_complementaries
@@ -89,7 +92,6 @@ router.get('/', async (req, res) => {
       mainParams
     );
 
-    // Count usa solo condParams (mismos índices $1...$N)
     const { rows: countRows } = await pool.query(
       `SELECT COUNT(*) FROM products p ${where}`, condParams
     );
@@ -111,34 +113,38 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   try {
-    const priceListId = await resolveListForRequest(req);
-    const { select: priceSelect, join: priceJoin } = priceSqlFragment({
+    const chain = await resolveChainForRequest(req);
+    const priceListId = chain[0] || null;
+    const listIdParams = chain.map((_, i) => `$${i + 1}`);
+    const idParamIdx = chain.length + 1;
+    const primaryListSqlValue = chain.length ? listIdParams[0] : 'NULL';
+
+    const { select: priceSelect, join: priceJoin } = priceSqlFragmentChain({
       alias: 'p',
-      listIdParam: '$1',
+      listIdParams,
     });
 
     const { rows } = await pool.query(
       `SELECT p.*, c.name AS category_name,
          ${priceSelect} AS price,
-         $1::int AS price_list_id
+         ${primaryListSqlValue}::int AS price_list_id
        FROM products p
        JOIN categories c ON c.id = p.category_id
        ${priceJoin}
-       WHERE p.id = $2`,
-      [priceListId, id]
+       WHERE p.id = $${idParamIdx}`,
+      [...chain, id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'Producto no encontrado' });
 
-    // Complementarios expandidos (query independiente, alias pl/pli en su propio scope)
-    const compFrag = priceSqlFragment({ alias: 'p2', listIdParam: '$1' });
+    const compFrag = priceSqlFragmentChain({ alias: 'p2', listIdParams });
     const { rows: comps } = await pool.query(
       `SELECT p2.id, p2.name, p2.sku,
               ${compFrag.select} AS price
        FROM product_complementaries pc
        JOIN products p2 ON p2.id = pc.complementary_id
        ${compFrag.join}
-       WHERE pc.product_id = $2 AND p2.active = true`,
-      [priceListId, id]
+       WHERE pc.product_id = $${idParamIdx} AND p2.active = true`,
+      [...chain, id]
     );
 
     return res.json({ ...rows[0], complementaries: comps });
@@ -299,24 +305,48 @@ router.delete('/:id/image', requireRole('admin'), async (req, res) => {
   }
 });
 
-// DELETE /products/:id — soft delete
+// DELETE /products/:id — hard delete con validacion estricta
 router.delete('/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id);
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
-      `SELECT oi.id FROM order_items oi
-       JOIN orders o ON o.id = oi.order_id
-       WHERE oi.product_id = $1
-         AND o.status NOT IN ('Entregado', 'Rechazado')
-       LIMIT 1`,
-      [id]
+    await client.query('BEGIN');
+
+    const { rows: prod } = await client.query(`SELECT image_url FROM products WHERE id = $1`, [id]);
+    if (!prod[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Producto no encontrado' });
+    }
+
+    // order_items.product_id es ON DELETE RESTRICT — no puede borrarse si aparece en pedidos
+    const { rows: refs } = await client.query(
+      `SELECT 1 FROM order_items WHERE product_id = $1 LIMIT 1`, [id]
     );
-    if (rows.length) return res.status(409).json({ error: 'El producto aparece en pedidos activos' });
-    await pool.query(`UPDATE products SET active = false WHERE id = $1`, [id]);
-    return res.json({ message: 'Producto desactivado' });
+    if (refs.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'El producto aparece en pedidos. No puede eliminarse para preservar el historial.',
+      });
+    }
+
+    // product_complementaries y price_list_items son ON DELETE CASCADE
+    await client.query(`DELETE FROM products WHERE id = $1`, [id]);
+    await client.query('COMMIT');
+
+    // Limpieza best-effort de la imagen en GCS
+    if (prod[0].image_url) {
+      try { await deleteObject(prod[0].image_url); } catch (e) { console.warn('GCS delete:', e.message); }
+    }
+    return res.json({ message: 'Producto eliminado definitivamente' });
   } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23503') {
+      return res.status(409).json({ error: 'El producto tiene registros vinculados en el sistema' });
+    }
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    client.release();
   }
 });
 

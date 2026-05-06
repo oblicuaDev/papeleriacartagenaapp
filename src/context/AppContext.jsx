@@ -57,18 +57,19 @@ export function AppProvider({ children }) {
         usersApi.list({ limit: 200 }),
       );
     } else if (role === "advisor") {
+      // Cargamos TODOS los users (no solo clients) para poder mostrar repartidores
+      // disponibles al momento de asignar un pedido.
       loaders.push(
         productsApi.list({ active: true, limit: 100 }).then((r) => r.data ?? r),
         ordersApi.list({ limit: 100 }).then((r) => r.data ?? r),
         companiesApi.list({ active: true }),
-        usersApi.list({ role: "client", limit: 200 }),
+        usersApi.list({ limit: 300 }),
       );
     } else if (role === "client") {
-      // Catálogo + pedidos siempre.
-      // Usuarios y empresa solo si rol gestor (supervisor / admin_empresa) los necesita
-      // — el backend ya filtra por compañía/sucursal.
+      // Catálogo + pedidos siempre. Cargamos catalogo completo (limit alto)
+      // para que el creador de pedidos vea TODOS los productos disponibles.
       loaders.push(
-        catalogApi.list({ limit: 100 }).then((r) => r.data ?? r),
+        catalogApi.list({ limit: 500 }).then((r) => r.data ?? r),
         ordersApi.list({ limit: 100 }).then((r) => r.data ?? r),
         usersApi.list({ limit: 200 }),
         companiesApi.list({ active: true }),
@@ -186,7 +187,7 @@ export function AppProvider({ children }) {
     const role = currentUser?.role;
     if (role === "delivery") return; // delivery no consulta catalogo
     if (role === "client") {
-      const res = await catalogApi.list({ limit: 100 });
+      const res = await catalogApi.list({ limit: 500 });
       setProducts(res.data ?? res);
     } else {
       const res = await productsApi.list({ active: true, limit: 100 });

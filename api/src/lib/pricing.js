@@ -1,16 +1,23 @@
 // pricing.js — Resolucion centralizada de precios
 //
 // Modelo:
-//   1. price_list_items (override explicito por producto + lista)  ← PHASE 1
-//   2. base_price * price_lists.multiplier  (legacy)
-//   3. base_price                            (sin lista)
+//   1. price_list_items (override explicito por producto + lista)
+//   2. fallback CHAIN: si el producto no esta en la lista primaria,
+//      se busca en otras listas (sucursal -> company -> user)
+//   3. base_price * price_lists.multiplier  (legacy)
+//   4. base_price                            (sin lista)
 //
-// Resolucion de la LISTA aplicable (en orden):
+// Resolucion de la LISTA primaria (en orden):
 //   1. override explicito (admin/advisor pasa ?priceListId=...)
-//   2. sucursales.price_list_id       (PHASE 9: override por sucursal)
-//   3. companies.price_list_id        (PHASE 1: lista por empresa)
-//   4. users.price_list_id            (legacy: lista por usuario)
+//   2. sucursales.price_list_id
+//   3. companies.price_list_id
+//   4. users.price_list_id
 //   5. null  -> se usa solo base_price
+//
+// Fallback CHAIN para precios:
+//   sucursal_pl > company_pl > user_pl > base_price
+//   Si el producto NO existe en la lista primaria, se busca el override
+//   en las demas listas vinculadas al usuario antes de caer al base_price.
 //
 // Esta lib es la UNICA fuente de verdad de precio.
 // No duplicar la formula en otros archivos.
@@ -63,16 +70,25 @@ export async function resolvePriceListId({ companyId, userId, override } = {}, d
 
 /**
  * Routing de un pedido nuevo: resuelve en una sola query la lista de precios
- * y el asesor que debe atender al usuario dado.
+ * primaria, la cadena de fallback y el asesor del usuario dado.
  *
- * Prioridades (PHASE 9):
- *   priceListId: sucursal > company > user > null
- *   advisorId:   sucursal > company > null
+ * Prioridades:
+ *   priceListId:    sucursal > company > user > null   (lista primaria)
+ *   priceListChain: [sucursal, company, user] sin nulls ni duplicados
+ *   advisorId:      sucursal > company > null
  *
- * @returns {Promise<{ priceListId: number|null, advisorId: number|null }>}
+ * TODO: Asignacion automatica de repartidor.
+ *   Reglas a implementar en una iteracion futura:
+ *     - branches.delivery_id como repartidor por defecto de la sede
+ *     - round-robin entre repartidores activos de la sede del asesor
+ *     - regla por carga actual (menos pedidos en ruta)
+ *   Cuando se implemente, devolver tambien `deliveryId` y aplicarlo en
+ *   POST /orders junto con advisorId.
+ *
+ * @returns {Promise<{ priceListId: number|null, priceListChain: number[], advisorId: number|null }>}
  */
 export async function resolveOrderRouting(userId, db = pool) {
-  if (!userId) return { priceListId: null, advisorId: null };
+  if (!userId) return { priceListId: null, priceListChain: [], advisorId: null };
 
   const { rows } = await db.query(
     `SELECT s.price_list_id AS sucursal_pl,
@@ -86,12 +102,64 @@ export async function resolveOrderRouting(userId, db = pool) {
       WHERE u.id = $1`,
     [userId]
   );
-  if (!rows[0]) return { priceListId: null, advisorId: null };
+  if (!rows[0]) return { priceListId: null, priceListChain: [], advisorId: null };
 
+  const chain = dedupeIds([rows[0].sucursal_pl, rows[0].company_pl, rows[0].user_pl]);
   return {
-    priceListId: rows[0].sucursal_pl || rows[0].company_pl || rows[0].user_pl || null,
-    advisorId:   rows[0].sucursal_advisor || rows[0].company_advisor || null,
+    priceListId:    chain[0] || null,
+    priceListChain: chain,
+    advisorId:      rows[0].sucursal_advisor || rows[0].company_advisor || null,
   };
+}
+
+/**
+ * Resuelve la cadena de listas aplicables a un usuario / empresa.
+ * Devuelve un array ordenado [sucursal, company, user] sin nulls ni duplicados.
+ * Si se pasa override, retorna [override] (gana prioridad absoluta).
+ */
+export async function resolvePriceListChain({ companyId, userId, override } = {}, db = pool) {
+  if (override) {
+    const id = parseInt(override);
+    return Number.isFinite(id) ? [id] : [];
+  }
+
+  if (userId) {
+    const { rows } = await db.query(
+      `SELECT s.price_list_id AS sucursal_pl,
+              c.price_list_id AS company_pl,
+              u.price_list_id AS user_pl
+         FROM users u
+         LEFT JOIN sucursales s ON s.id = u.sucursal_id
+         LEFT JOIN companies  c ON c.id = u.company_id
+        WHERE u.id = $1`,
+      [userId]
+    );
+    if (rows[0]) {
+      return dedupeIds([rows[0].sucursal_pl, rows[0].company_pl, rows[0].user_pl]);
+    }
+  }
+
+  if (companyId) {
+    const { rows } = await db.query(
+      `SELECT price_list_id FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    if (rows[0]?.price_list_id) return [rows[0].price_list_id];
+  }
+  return [];
+}
+
+function dedupeIds(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const v of arr) {
+    if (v == null) continue;
+    const id = parseInt(v);
+    if (!Number.isFinite(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 /**
@@ -166,5 +234,46 @@ export function priceSqlFragment({ alias = 'p', listIdParam }) {
       LEFT JOIN price_lists      pl  ON pl.id            = ${listIdParam}
       LEFT JOIN price_list_items pli ON pli.product_id   = ${alias}.id
                                     AND pli.price_list_id = ${listIdParam}`,
+  };
+}
+
+/**
+ * Fragmento SQL con cadena de fallback: si el producto no esta en la lista
+ * primaria, busca en las siguientes; si en ninguna existe override, usa
+ * base_price * multiplier de la primaria.
+ *
+ * @param {object} cfg
+ * @param {string} cfg.alias               — alias de products (ej 'p')
+ * @param {string[]} cfg.listIdParams      — placeholders en orden de prioridad ['$1', '$2', '$3']
+ * @returns {{ select: string, join: string }}
+ *
+ * Si listIdParams esta vacio, el SELECT cae directo al base_price.
+ */
+export function priceSqlFragmentChain({ alias = 'p', listIdParams = [] }) {
+  if (!listIdParams.length) {
+    return {
+      select: `ROUND(${alias}.base_price)::int`,
+      join: '',
+    };
+  }
+  const joins = [
+    `LEFT JOIN price_lists pl ON pl.id = ${listIdParams[0]}`,
+  ];
+  const priceCoalesce = [];
+  listIdParams.forEach((param, idx) => {
+    const a = `pli_${idx}`;
+    joins.push(
+      `LEFT JOIN price_list_items ${a} ON ${a}.product_id = ${alias}.id AND ${a}.price_list_id = ${param}`
+    );
+    priceCoalesce.push(`${a}.price`);
+  });
+  return {
+    select: `ROUND(
+      COALESCE(
+        ${priceCoalesce.join(',\n        ')},
+        ${alias}.base_price * COALESCE(pl.multiplier, 1)
+      )
+    )::int`,
+    join: joins.join('\n      '),
   };
 }

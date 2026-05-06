@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { resolvePriceListId, priceSqlFragment } from '../lib/pricing.js';
+import { resolvePriceListChain, priceSqlFragmentChain } from '../lib/pricing.js';
 
 const router = Router();
 router.use(requireAuth, requireRole('client'));
@@ -15,7 +15,8 @@ router.get('/', async (req, res) => {
   const offset = (pageNum - 1) * limitNum;
 
   try {
-    const priceListId = await resolvePriceListId({ companyId, userId });
+    const chain = await resolvePriceListChain({ companyId, userId });
+    const priceListId = chain[0] || null;
 
     let priceListName = null;
     if (priceListId) {
@@ -26,7 +27,9 @@ router.get('/', async (req, res) => {
       priceListName = plRows[0]?.name ?? null;
     }
 
-    const params = [priceListId];
+    // Lista IDs como primeros params (uno por nivel de la cadena)
+    const params = [...chain];
+    const listIdParams = chain.map((_, i) => `$${i + 1}`);
     const conditions = [
       'p.active = true',
       'c.active = true'
@@ -38,19 +41,15 @@ router.get('/', async (req, res) => {
       const s = '%' + search + '%';
       params.push(s);
       const sIndex = params.length;
-      // Reutilizamos el mismo índice para optimizar la query
       conditions.push(`(p.name ILIKE $${sIndex} OR p.sku ILIKE $${sIndex})`);
     }
 
     const where = 'WHERE ' + conditions.join(' AND ');
     const condParamCount = params.length;
 
-    // DEBUG OBLIGATORIO: Query Params
-    console.log("QUERY PARAMS:", params);
-
-    const { select: priceSelect, join: priceJoin } = priceSqlFragment({
+    const { select: priceSelect, join: priceJoin } = priceSqlFragmentChain({
       alias: 'p',
-      listIdParam: '$1',
+      listIdParams,
     });
 
     // Se asignan ALIAS en camelCase para que el frontend los lea correctamente

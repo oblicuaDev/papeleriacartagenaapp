@@ -63,24 +63,29 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
   }
 });
 
-// DELETE /categories/:id
+// DELETE /categories/:id — hard delete con validacion
 router.delete('/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id);
   try {
+    // products.category_id es ON DELETE RESTRICT
     const { rows } = await pool.query(
-      `SELECT id FROM products WHERE category_id = $1 AND active = true LIMIT 1`,
-      [id]
+      `SELECT id FROM products WHERE category_id = $1 LIMIT 1`, [id]
     );
-
     if (rows.length) {
       return res.status(409).json({
-        error: 'La categoría tiene productos activos asociados'
+        error: 'La categoría tiene productos asociados. Reasigna o elimina los productos antes.',
       });
     }
 
-    await pool.query(`UPDATE categories SET active = false WHERE id = $1`, [id]);
-    return res.json({ message: 'Categoría eliminada' });
+    const result = await pool.query(`DELETE FROM categories WHERE id = $1`, [id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Categoría no encontrada' });
+    }
+    return res.json({ message: 'Categoría eliminada definitivamente' });
   } catch (err) {
+    if (err.code === '23503') {
+      return res.status(409).json({ error: 'La categoría tiene productos vinculados' });
+    }
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }

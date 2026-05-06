@@ -11,24 +11,26 @@ router.use(requireAuth);
 // Lanza un Error con .status para errores de autorizacion.
 function buildScopeFilter(req) {
   const { role, id, companyId, clientRole, sucursalId } = req.user;
-  const { dateFrom, dateTo, status, companyId: qCompanyId } = req.query;
+  const { dateFrom, dateTo, status, companyId: qCompanyId, sucursalId: qSucursalId } = req.query;
 
   const params = [];
   const conds = [];
 
   if (role === 'admin') {
     if (qCompanyId) conds.push(`uc.company_id = $${params.push(parseInt(qCompanyId))}`);
+    if (qSucursalId) conds.push(`uc.sucursal_id = $${params.push(parseInt(qSucursalId))}`);
   } else if (role === 'advisor') {
     conds.push(`o.advisor_id = $${params.push(id)}`);
   } else if (role === 'client' && clientRole === 'creador_pedidos') {
     conds.push(`o.client_id = $${params.push(id)}`);
   } else if (role === 'client' && clientRole === 'supervisor') {
-    // PHASE 3: supervisor solo ve su sucursal
+    // Supervisor solo ve su sucursal
     conds.push(`uc.company_id = $${params.push(companyId)}`);
     conds.push(`uc.sucursal_id = $${params.push(sucursalId ?? null)}`);
   } else if (role === 'client' && clientRole === 'admin_empresa') {
-    // PHASE 3: admin_empresa ve toda su empresa
+    // admin_empresa ve toda su empresa, opcionalmente filtrado por sucursal
     conds.push(`uc.company_id = $${params.push(companyId)}`);
+    if (qSucursalId) conds.push(`uc.sucursal_id = $${params.push(parseInt(qSucursalId))}`);
   } else {
     const e = new Error('No autorizado');
     e.status = 403;
@@ -149,19 +151,24 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
 //   - creador_pedidos: stats de sus propios pedidos
 router.get('/client', requireRole('client'), async (req, res) => {
   const { id: myId, companyId, clientRole, sucursalId } = req.user;
+  const { sucursalId: qSucursalId } = req.query;
 
-  // PHASE 3:
   //   creador_pedidos: ve sus propios pedidos
   //   supervisor:      ve los pedidos de su sucursal
-  //   admin_empresa:   ve los pedidos de toda la empresa
+  //   admin_empresa:   ve los pedidos de toda la empresa (filtro opcional por sucursalId)
   const isCompanyWide = clientRole === 'admin_empresa';
   const isSupervisor  = clientRole === 'supervisor';
 
   let where;
   let params;
   if (isCompanyWide) {
-    where  = `uc.company_id = $1`;
-    params = [companyId];
+    if (qSucursalId) {
+      where  = `uc.company_id = $1 AND uc.sucursal_id = $2`;
+      params = [companyId, parseInt(qSucursalId)];
+    } else {
+      where  = `uc.company_id = $1`;
+      params = [companyId];
+    }
   } else if (isSupervisor) {
     where  = `uc.company_id = $1 AND uc.sucursal_id = $2`;
     params = [companyId, sucursalId ?? null];

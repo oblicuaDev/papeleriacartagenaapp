@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X } from 'lucide-react';
+import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { STATUS_STYLES, formatCOP } from '../../data/mockData';
+import { STATUS_STYLES, formatCOP, statusLabel } from '../../data/mockData';
+
+// Estados en los que el asesor puede gestionar (no solo ver)
+const MANAGE_STATUSES = ['Pendiente', 'Validar disponibilidad', 'Alistamiento', 'En Ruta'];
 
 const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
@@ -210,17 +213,27 @@ export default function AdvisorOrders() {
                     <td className="px-5 py-4 text-sm font-medium text-gray-800">{formatCOP(order.total)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>
-                        {order.status}
+                        {statusLabel(order.status)}
                       </span>
                     </td>
                     <td className="px-5 py-4">
-                      <button
-                        onClick={() => navigate(`/asesor/pedido/${order.id}`)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs font-medium transition"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        Ver detalle
-                      </button>
+                      {MANAGE_STATUSES.includes(order.status) ? (
+                        <button
+                          onClick={() => navigate(`/asesor/pedido/${order.id}`)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-white bg-blue-700 hover:bg-blue-800 rounded-lg text-xs font-medium transition"
+                        >
+                          <Settings2 className="w-3.5 h-3.5" />
+                          Gestionar pedido
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => navigate(`/asesor/pedido/${order.id}`)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs font-medium transition"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Ver detalle
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

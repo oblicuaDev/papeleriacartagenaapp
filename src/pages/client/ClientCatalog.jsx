@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useOutletContext } from "react-router-dom";
 import {
   ShoppingCart,
@@ -9,6 +9,7 @@ import {
   X,
   Package,
   Filter,
+  Sparkles,
 } from "lucide-react";
 import { useApp } from "../../context/AppContext";
 import { useAuth } from "../../context/AuthContext";
@@ -151,7 +152,7 @@ function ProductModal({
 export default function ClientCatalog() {
   const context = useOutletContext() || {};
   const headerSearch = context.search || "";
-  const { products, categories, addToCart } = useApp();
+  const { products, categories, addToCart, orders } = useApp();
   const { currentUser } = useAuth();
   const isReadOnly = currentUser?.clientRole === "admin_empresa";
   const [selectedCategory, setSelectedCategory] = useState(null);
@@ -159,9 +160,6 @@ export default function ClientCatalog() {
   const [modalProduct, setModalProduct] = useState(null);
 
   const search = headerSearch;
-
-  // DEBUG OBLIGATORIO: Estado del context
-  console.log("PRODUCTS CONTEXT:", products);
 
   function getCategoryName(id) {
     return categories.find((c) => c.id === id)?.name || "—";
@@ -172,11 +170,28 @@ export default function ClientCatalog() {
     return CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
   }
 
-  // CORRECCIÓN: Prevención de errores con null o arrays vacíos
   const safeProducts = Array.isArray(products) ? products : [];
 
+  // Productos sugeridos: top 6 mas pedidos por el usuario en su historial
+  const suggestedProducts = useMemo(() => {
+    if (!currentUser || !orders?.length) return [];
+    const myOrders = orders.filter((o) => o.clientId === currentUser.id);
+    const qtyById = {};
+    for (const o of myOrders) {
+      for (const it of o.items || []) {
+        qtyById[it.productId] = (qtyById[it.productId] || 0) + it.quantity;
+      }
+    }
+    const sortedIds = Object.entries(qtyById)
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => Number(id));
+    return sortedIds
+      .map((id) => safeProducts.find((p) => p.id === id))
+      .filter(Boolean)
+      .slice(0, 6);
+  }, [orders, currentUser, safeProducts]);
+
   const filtered = safeProducts.filter((p) => {
-    // Evitamos crash de React si name o sku llegan null
     const pName = p.name || "";
     const pSku = p.sku || "";
 
@@ -184,7 +199,6 @@ export default function ClientCatalog() {
       pName.toLowerCase().includes(search.toLowerCase()) ||
       pSku.toLowerCase().includes(search.toLowerCase());
 
-    // p.categoryId ya existe gracias al ALIAS del SQL
     const matchCat = selectedCategory
       ? p.categoryId === selectedCategory
       : true;
@@ -194,6 +208,11 @@ export default function ClientCatalog() {
 
   function handleAdd(product, qty) {
     addToCart(product, qty, product.price);
+  }
+
+  function handleQuickAdd(e, product) {
+    e.stopPropagation();
+    handleAdd(product, 1);
   }
 
   const modalPrice = modalProduct ? modalProduct.price : 0;
@@ -207,6 +226,47 @@ export default function ClientCatalog() {
           {filtered.length} productos disponibles
         </p>
       </div>
+
+      {/* Productos sugeridos según historial */}
+      {!isReadOnly && suggestedProducts.length > 0 && !search && !selectedCategory && (
+        <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-100 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles className="w-4 h-4 text-purple-600" />
+            <h3 className="text-sm font-semibold text-gray-800">
+              Sugeridos para ti
+            </h3>
+            <span className="text-xs text-gray-500">basado en tus pedidos anteriores</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {suggestedProducts.map((product) => (
+              <div
+                key={product.id}
+                onClick={() => setModalProduct(product)}
+                className="bg-white rounded-lg border border-gray-100 p-3 cursor-pointer hover:shadow-md hover:border-blue-300 transition group"
+              >
+                <ProductImage
+                  image={product.imageUrl}
+                  name={product.name}
+                  className="w-full h-20 object-contain mb-2"
+                />
+                <p className="text-xs font-medium text-gray-800 line-clamp-2 mb-1">
+                  {product.name}
+                </p>
+                <p className="text-sm font-bold text-blue-700 mb-2">
+                  {formatCOP(product.price)}
+                </p>
+                <button
+                  onClick={(e) => handleQuickAdd(e, product)}
+                  className="w-full flex items-center justify-center gap-1 py-1.5 bg-blue-700 text-white rounded text-xs font-semibold hover:bg-blue-800 transition"
+                >
+                  <Plus className="w-3 h-3" />
+                  Agregar
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Category Dropdown + View Toggle */}
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -281,12 +341,21 @@ export default function ClientCatalog() {
                   <h3 className="text-sm font-semibold text-gray-800 mb-3 line-clamp-2 leading-snug flex-1">
                     {product.name}
                   </h3>
-                  <div>
+                  <div className="mb-3">
                     <p className="text-xl font-bold text-blue-700">
                       {formatCOP(price)}
                     </p>
                     <p className="text-xs text-gray-400">por {product.unit}</p>
                   </div>
+                  {!isReadOnly && (
+                    <button
+                      onClick={(e) => handleQuickAdd(e, product)}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Agregar al pedido
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -317,6 +386,7 @@ export default function ClientCatalog() {
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">
                     Precio
                   </th>
+                  {!isReadOnly && <th className="px-4 py-3"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -356,13 +426,24 @@ export default function ClientCatalog() {
                         </p>
                         <p className="text-xs text-gray-400">/{product.unit}</p>
                       </td>
+                      {!isReadOnly && (
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={(e) => handleQuickAdd(e, product)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Agregar
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
                 {filtered.length === 0 && (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={isReadOnly ? 4 : 5}
                       className="px-4 py-10 text-center text-sm text-gray-400"
                     >
                       No se encontraron productos

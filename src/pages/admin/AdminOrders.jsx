@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ChevronDown, ExternalLink, Download } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
-import { STATUS_STYLES, ORDER_STATUSES, formatCOP } from '../../data/mockData';
+import { STATUS_STYLES, ORDER_STATUSES, formatCOP, statusLabel } from '../../data/mockData';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
 
@@ -71,7 +71,7 @@ export default function AdminOrders() {
               className="appearance-none border border-gray-300 rounded-lg pl-3 pr-9 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
               <option value="">Todos los estados</option>
-              {allStatuses.map(s => <option key={s} value={s}>{s}</option>)}
+              {allStatuses.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
             </select>
           </div>
           <button
@@ -144,7 +144,7 @@ export default function AdminOrders() {
                     <td className="px-5 py-4 text-sm font-semibold text-gray-800">{formatCOP(order.total)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>
-                        {order.status}
+                        {statusLabel(order.status)}
                       </span>
                     </td>
                     <td className="px-5 py-4">

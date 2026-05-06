@@ -15,14 +15,21 @@ const publicUserFields = `
 `;
 
 // GET /users
-router.get('/', requireAdminOrSupervisor, async (req, res) => {
+// Permitido para admin, supervisor/admin_empresa (limitado a su empresa)
+// y advisor (necesita listar repartidores y clientes para gestionar pedidos).
+router.get('/', (req, res, next) => {
+  const { role, clientRole } = req.user;
+  if (role === 'admin' || role === 'advisor') return next();
+  if (role === 'client' && (clientRole === 'supervisor' || clientRole === 'admin_empresa')) return next();
+  return res.status(403).json({ error: 'No autorizado' });
+}, async (req, res) => {
   const { role: myRole, companyId: myCompanyId } = req.user;
   const { role, companyId, sucursalId, active, search } = req.query;
 
   const params = [];
   const conditions = [];
 
-  // Supervisor solo ve su empresa
+  // Supervisor/admin_empresa solo ve su empresa
   if (myRole === 'client') {
     conditions.push(`u.company_id = $${params.push(myCompanyId)}`);
   } else if (companyId) {
@@ -76,12 +83,14 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /users
+// Para clients la lista de precios NO se solicita: se hereda automaticamente
+// de sucursal > company en el momento del pedido (resolveOrderRouting).
 router.post('/', requireAdminOrSupervisor, async (req, res) => {
-  const { role: myRole, companyId: myCompanyId, clientRole: myClientRole } = req.user;
+  const { role: myRole, companyId: myCompanyId } = req.user;
   const {
     name, email, password, role, clientRole,
-    companyId, sucursalId, priceListId, branchId,
-    contactName, phone, address, active = true,
+    companyId, sucursalId, branchId,
+    contactName, phone, address, active = true, initials,
   } = req.body;
 
   if (!name || !email || !password || !role) {
@@ -108,8 +117,8 @@ router.post('/', requireAdminOrSupervisor, async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO users
          (name, email, password_hash, role, client_role, company_id, sucursal_id,
-          price_list_id, branch_id, contact_name, phone, address, active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          price_list_id, branch_id, contact_name, phone, address, initials, active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING ${publicUserFields}`,
       [
         name,
@@ -119,11 +128,13 @@ router.post('/', requireAdminOrSupervisor, async (req, res) => {
         role === 'client' ? clientRole || null : null,
         role === 'client' ? (companyId || myCompanyId) : null,
         role === 'client' ? sucursalId || null : null,
-        role === 'client' ? priceListId || null : null,
+        // price_list_id siempre null en alta — se hereda en runtime via resolveOrderRouting
+        null,
         (role === 'advisor' || role === 'delivery') ? branchId || null : null,
         contactName || null,
         phone || null,
         address || null,
+        initials || null,
         active,
       ]
     );
@@ -190,27 +201,58 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE /users/:id
+// DELETE /users/:id — hard delete con validacion de dependencias
 router.delete('/:id', requireAdminOrSupervisor, async (req, res) => {
   const { id: myId, companyId: myCompanyId, role: myRole } = req.user;
   const targetId = parseInt(req.params.id);
 
   if (myId === targetId) return res.status(409).json({ error: 'No se puede eliminar el propio usuario' });
 
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(`SELECT * FROM users WHERE id = $1`, [targetId]);
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(`SELECT * FROM users WHERE id = $1 FOR UPDATE`, [targetId]);
     const target = rows[0];
-    if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (!target) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
 
     if (myRole === 'client' && target.company_id !== myCompanyId) {
+      await client.query('ROLLBACK');
       return res.status(403).json({ error: 'No autorizado' });
     }
 
-    await pool.query(`UPDATE users SET active = false WHERE id = $1`, [targetId]);
-    return res.json({ message: 'Usuario eliminado correctamente' });
+    // Dependencias bloqueantes (orders.client_id tiene ON DELETE RESTRICT)
+    const { rows: clientOrders } = await client.query(
+      `SELECT id FROM orders WHERE client_id = $1 LIMIT 1`, [targetId]
+    );
+    if (clientOrders.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'El usuario tiene pedidos creados. No puede eliminarse para preservar el historial.',
+      });
+    }
+
+    // companies.advisor_id, sucursales.advisor_id, orders.advisor_id, orders.delivery_id, orders.delivered_by
+    // tienen ON DELETE SET NULL → se limpian automaticamente.
+    // order_status_log.changed_by tambien es SET NULL.
+
+    await client.query(`DELETE FROM users WHERE id = $1`, [targetId]);
+    await client.query('COMMIT');
+    return res.json({ message: 'Usuario eliminado definitivamente' });
   } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23503') {
+      return res.status(409).json({
+        error: 'No se puede eliminar: el usuario tiene registros vinculados en el sistema',
+      });
+    }
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    client.release();
   }
 });
 

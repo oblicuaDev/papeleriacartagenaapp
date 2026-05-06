@@ -79,7 +79,7 @@ export default function AdminCategories() {
       alert(`La categoría "${cat.name}" tiene ${count} producto(s) asociado(s). Reasígnalos antes de eliminar.`);
       return;
     }
-    const ok = window.confirm(`¿Eliminar la categoría "${cat.name}"?`);
+    const ok = window.confirm(`¿Eliminar definitivamente la categoría "${cat.name}"? Esta acción no se puede deshacer.`);
     if (!ok) return;
     try {
       await categoriesApi.remove(cat.id);

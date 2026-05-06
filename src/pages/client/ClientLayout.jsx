@@ -12,7 +12,8 @@ export default function ClientLayout() {
 
   const isSupervisor   = currentUser?.clientRole === 'supervisor';
   const isAdminEmpresa = currentUser?.clientRole === 'admin_empresa';
-  const canManage      = isSupervisor || isAdminEmpresa;
+  // Supervisor NO administra empresas/sucursales/usuarios — solo ve sus pedidos.
+  const canManage      = isAdminEmpresa;
 
   // Solo el supervisor ve aprobaciones de su sucursal.
   const supervisorClientIds = isSupervisor

@@ -106,7 +106,7 @@ export default function AdminUsers() {
   }
 
   async function handleDelete(user) {
-    const ok = window.confirm(`¿Eliminar a ${user.name}? Quedará desactivado y no podrá iniciar sesión.`);
+    const ok = window.confirm(`¿Eliminar definitivamente a ${user.name}? Esta acción no se puede deshacer.`);
     if (!ok) return;
     try {
       await usersApi.remove(user.id);

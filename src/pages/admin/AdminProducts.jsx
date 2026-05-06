@@ -263,7 +263,7 @@ export default function AdminProducts() {
 
   async function handleDelete(product) {
     const ok = window.confirm(
-      `¿Eliminar "${product.name}"? Si está en pedidos activos no se podrá eliminar.`,
+      `¿Eliminar definitivamente "${product.name}"? Esta acción no se puede deshacer. Si está en pedidos no podrá eliminarse.`,
     );
     if (!ok) return;
     try {

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { resolvePriceListId, priceSqlFragment, resolveOrderRouting } from '../lib/pricing.js';
+import { priceSqlFragmentChain, resolveOrderRouting } from '../lib/pricing.js';
 import { ensurePurchaseOrderPdf, loadOrderContext } from '../lib/purchaseOrderPdf.js';
 import { buildOrderDetailXlsx } from '../lib/orderExport.js';
 
@@ -28,15 +28,17 @@ const VALID_TRANSITIONS = {
   supervisor: {
     'Pendiente por aprobar': ['Pendiente', 'Rechazado'],
   },
-  // PHASE 5: rol delivery (couriers)
+  // Rol delivery: maneja todo el flujo operativo desde aprobado en adelante.
   delivery: {
-    'Alistamiento': ['En Ruta'],
-    'En Ruta':      ['Entregado'],
+    'Pendiente':              ['Validar disponibilidad'],
+    'Validar disponibilidad': ['Alistamiento'],
+    'Alistamiento':           ['En Ruta'],
+    'En Ruta':                ['Entregado'],
   },
 };
 
-// Estados visibles para delivery (operativo)
-const DELIVERY_VISIBLE_STATUSES = ['Alistamiento', 'En Ruta', 'Entregado'];
+// Estados visibles para delivery (operativo: desde aprobado hasta entregado)
+const DELIVERY_VISIBLE_STATUSES = ['Pendiente', 'Validar disponibilidad', 'Alistamiento', 'En Ruta', 'Entregado'];
 
 // GET /orders
 router.get('/', async (req, res) => {
@@ -385,17 +387,18 @@ router.post('/', requireRole('client'), async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // PHASE 9: routing del pedido (sucursal > company > user para precio,
-    // sucursal > company para asesor) en una sola query
-    const { priceListId: orderPriceListId, advisorId: orderAdvisorId } =
+    // Routing del pedido + cadena de fallback de listas
+    const { priceListId: orderPriceListId, priceListChain, advisorId: orderAdvisorId } =
       await resolveOrderRouting(clientId, client);
 
-    const { select: priceSelect, join: priceJoin } = priceSqlFragment({
+    // Params para la query de precios: $1 = productId, $2..$N = chain
+    const listIdParams = priceListChain.map((_, i) => `$${i + 2}`);
+    const { select: priceSelect, join: priceJoin } = priceSqlFragmentChain({
       alias: 'p',
-      listIdParam: '$2',
+      listIdParams,
     });
 
-    // Calcular total y armar snapshot frozen con precio BACKEND
+    // Calcular total y armar snapshot frozen con precio BACKEND (con fallback chain)
     let total = 0;
     const itemsToInsert = [];
     const priceMismatches = [];
@@ -407,7 +410,7 @@ router.post('/', requireRole('client'), async (req, res) => {
          FROM products p
          ${priceJoin}
          WHERE p.id = $1`,
-        [item.productId, orderPriceListId]
+        [item.productId, ...priceListChain]
       );
       const product = productRows[0];
       if (!product) {
@@ -459,7 +462,9 @@ router.post('/', requireRole('client'), async (req, res) => {
     const { rows: idRows } = await client.query(`SELECT fn_generate_order_id() AS id`);
     const newId = idRows[0].id;
 
-    // Crear pedido (PHASE 9: pre-asignar advisor segun routing de empresa/sucursal)
+    // Crear pedido. Pre-asignamos asesor segun routing (sucursal > company).
+    // TODO: pre-asignar repartidor automaticamente cuando se implementen
+    // las reglas de asignacion (round-robin, branches.delivery_id, carga, etc).
     await client.query(
       `INSERT INTO orders (id, client_id, advisor_id, status, notes, total)
        VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -614,14 +619,17 @@ router.put('/:id', async (req, res) => {
       fields.push(`delivered_at = NOW()`);
     }
 
-    // PHASE 3: admin/advisor pueden asignar repartidor.
+    // admin/advisor pueden asignar repartidor.
     // El backend valida que sea un usuario active con role=delivery (o null para desasignar).
+    let deliveryAssignmentLog = null; // { name } | { unassigned: true }
     if (deliveryId !== undefined && (role === 'admin' || role === 'advisor')) {
+      const previousDeliveryId = order.delivery_id;
       if (deliveryId === null) {
         fields.push(`delivery_id = NULL`);
+        if (previousDeliveryId) deliveryAssignmentLog = { unassigned: true };
       } else {
         const { rows: dRows } = await client.query(
-          `SELECT id FROM users WHERE id = $1 AND role = 'delivery' AND active = true`,
+          `SELECT id, name FROM users WHERE id = $1 AND role = 'delivery' AND active = true`,
           [deliveryId]
         );
         if (!dRows[0]) {
@@ -629,6 +637,9 @@ router.put('/:id', async (req, res) => {
           return res.status(422).json({ error: 'deliveryId invalido' });
         }
         fields.push(`delivery_id = $${params.push(deliveryId)}`);
+        if (previousDeliveryId !== deliveryId) {
+          deliveryAssignmentLog = { name: dRows[0].name };
+        }
       }
     }
 
@@ -654,6 +665,17 @@ router.put('/:id', async (req, res) => {
         `INSERT INTO order_status_log (order_id, from_status, to_status, changed_by, reason)
          VALUES ($1, $2, $3, $4, $5)`,
         [orderId, order.status, status, myId, reason?.trim() || null]
+      );
+    }
+
+    // Registrar asignacion/desasignacion de repartidor en historial (como comentario sistema)
+    if (deliveryAssignmentLog) {
+      const text = deliveryAssignmentLog.unassigned
+        ? '🚚 Repartidor desasignado'
+        : `🚚 Repartidor asignado: ${deliveryAssignmentLog.name}`;
+      await client.query(
+        `INSERT INTO order_comments (order_id, author_id, text) VALUES ($1, $2, $3)`,
+        [orderId, myId, text]
       );
     }
 

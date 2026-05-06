@@ -18,4 +18,21 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    // Separa dependencias pesadas en chunks dedicados para que el bundle
+    // principal no exceda 500KB. Las paginas siguen siendo eager-loaded
+    // (no introducimos React.lazy aun) para no romper navegacion existente.
+    // TODO: cuando se aplique code splitting por ruta usar React.lazy en App.jsx.
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'charts': ['recharts'],
+          'xlsx': ['xlsx'],
+          'icons': ['lucide-react'],
+        },
+      },
+    },
+  },
 })

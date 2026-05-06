@@ -2,7 +2,7 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { priceSqlFragmentChain, resolveOrderRouting } from '../lib/pricing.js';
-import { ensurePurchaseOrderPdf, loadOrderContext } from '../lib/purchaseOrderPdf.js';
+import { ensurePurchaseOrderPdf, loadOrderContext, renderPdfBuffer } from '../lib/purchaseOrderPdf.js';
 import { buildOrderDetailXlsx } from '../lib/orderExport.js';
 
 const router = Router();
@@ -158,6 +158,36 @@ async function canViewOrder(req, order) {
   }
   return false;
 }
+
+// Handler reutilizable: regenera el PDF al vuelo con el template actual.
+// Montado en /orders/:id/purchase-order.pdf y en /purchase-orders/:id/pdf.
+// NO lee el archivo guardado en storage: pedidos historicos reflejan
+// automaticamente cualquier cambio de diseno.
+export async function purchaseOrderPdfHandler(req, res) {
+  const orderId = req.params.id.toUpperCase();
+  try {
+    const { rows: head } = await pool.query(
+      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
+      [orderId]
+    );
+    if (!head[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (!(await canViewOrder(req, head[0]))) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    const { order, items } = await loadOrderContext(orderId);
+    const buf = await renderPdfBuffer({ order, items });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="orden_compra_${orderId}.pdf"`);
+    return res.send(buf);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error generando el PDF de la orden de compra' });
+  }
+}
+
+router.get('/:id/purchase-order.pdf', purchaseOrderPdfHandler);
 
 // GET /orders/:id/export.xlsx — Excel detallado de un pedido
 router.get('/:id/export.xlsx', async (req, res) => {

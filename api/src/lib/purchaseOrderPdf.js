@@ -76,7 +76,10 @@ export async function loadOrderContext(orderId, db = pool) {
 }
 
 // Construye el PDF en memoria y devuelve un Buffer.
-function renderPdfBuffer({ order, items }) {
+// Exportado para que el endpoint GET /orders/:id/purchase-order.pdf
+// pueda regenerar historicos contra el template actual sin depender
+// del archivo guardado en storage.
+export function renderPdfBuffer({ order, items }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'LETTER', margin: 50 });
     const chunks = [];

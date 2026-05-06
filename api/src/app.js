@@ -12,11 +12,12 @@ import usersRouter       from './routes/users.js';
 import categoriesRouter  from './routes/categories.js';
 import priceListsRouter  from './routes/priceLists.js';
 import productsRouter    from './routes/products.js';
-import ordersRouter      from './routes/orders.js';
+import ordersRouter, { purchaseOrderPdfHandler } from './routes/orders.js';
 import commentsRouter    from './routes/comments.js';
 import attachmentsRouter from './routes/attachments.js';
 import catalogRouter     from './routes/catalog.js';
 import statsRouter       from './routes/stats.js';
+import { requireAuth }   from './middleware/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +55,7 @@ api.use('/categories',                 categoriesRouter);
 api.use('/price-lists',                priceListsRouter);
 api.use('/products',                   productsRouter);
 api.use('/orders',                     ordersRouter);
+api.get('/purchase-orders/:id/pdf',    requireAuth, purchaseOrderPdfHandler);
 api.use('/orders/:orderId/comments',   commentsRouter);
 api.use('/orders/:orderId/attachments',attachmentsRouter);
 api.use('/catalog',                    catalogRouter);

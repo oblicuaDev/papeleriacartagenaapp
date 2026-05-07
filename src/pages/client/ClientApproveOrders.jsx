@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useApp } from "../../context/AppContext";
+import { ordersApi } from "../../services/api";
 import { STATUS_STYLES, formatCOP } from "../../data/mockData";
 import { useState } from "react";
 
@@ -137,9 +138,7 @@ function ConfirmApproveModal({ order, onConfirm, onCancel }) {
   );
 }
 
-function OrderDetailModal({ order, clientName, onApprove, onReject, onClose }) {
-  console.log(order);
-
+function OrderDetailModal({ order, clientName, loading, onApprove, onReject, onClose }) {
   const total = (order.items || []).reduce(
     (s, i) => s + i.unitPrice * i.quantity,
     0,
@@ -191,7 +190,21 @@ function OrderDetailModal({ order, clientName, onApprove, onReject, onClose }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {(order.items || []).map((item, idx) => (
+                {loading && (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-400">
+                      Cargando productos…
+                    </td>
+                  </tr>
+                )}
+                {!loading && (order.items || []).length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-400">
+                      Sin productos
+                    </td>
+                  </tr>
+                )}
+                {!loading && (order.items || []).map((item, idx) => (
                   <tr key={idx}>
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-800">
@@ -266,9 +279,26 @@ export default function ClientApproveOrders() {
   const { currentUser } = useAuth();
   const { orders, updateOrder, users } = useApp();
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [confirmOrder, setConfirmOrder] = useState(null); // approve confirmation
   const [rejectOrder, setRejectOrder] = useState(null); // reject confirmation
   const [actionError, setActionError] = useState(null);
+
+  // El listado /orders no incluye items[]; al abrir el modal pedimos el
+  // detalle completo (que incluye order_items con snapshot de productos).
+  async function openDetail(order) {
+    setSelectedOrder(order);
+    setDetailLoading(true);
+    try {
+      const full = await ordersApi.get(order.id);
+      setSelectedOrder((prev) => (prev?.id === order.id ? { ...prev, ...full } : prev));
+    } catch (err) {
+      setActionError(err?.message || "No se pudo cargar el pedido");
+      setSelectedOrder(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
 
   // Backend ya filtra por empresa, asi que solo filtramos por estado.
   const pendingOrders = orders
@@ -394,7 +424,7 @@ export default function ClientApproveOrders() {
 
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => setSelectedOrder(order)}
+                    onClick={() => openDetail(order)}
                     className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs font-medium hover:bg-gray-50 transition"
                   >
                     Ver detalle
@@ -438,6 +468,7 @@ export default function ClientApproveOrders() {
         <OrderDetailModal
           order={selectedOrder}
           clientName={getClientName(selectedOrder.clientId)}
+          loading={detailLoading}
           onApprove={requestApprove}
           onReject={(_id) => requestReject(selectedOrder)}
           onClose={() => setSelectedOrder(null)}

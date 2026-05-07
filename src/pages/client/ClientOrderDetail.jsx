@@ -1,9 +1,11 @@
 import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft, Package, FileText, Paperclip, MessageSquare,
   File, FileText as FilePdf, ImageIcon, Download, User, Calendar, Truck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { ordersApi } from '../../services/api';
 import { STATUS_STYLES, formatCOP } from '../../data/mockData';
 
 function fileIcon(type = '') {
@@ -38,18 +40,43 @@ function roleBadge(role) {
 export default function ClientOrderDetail() {
   const { orderId } = useParams();
   const navigate    = useNavigate();
-  const { orders, users } = useApp();
+  const { users } = useApp();
 
-  const order    = orders.find(o => o.id === orderId);
+  // El listado /orders no trae items/comments/attachments. Hacemos fetch del
+  // detalle completo aquí (incluye order_items con snapshot productName/sku).
+  const [order, setOrder] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    ordersApi
+      .get(orderId)
+      .then((full) => { if (!cancelled) setOrder(full); })
+      .catch((err) => { if (!cancelled) setError(err?.message || 'No se pudo cargar el pedido'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [orderId]);
+
   const style    = order ? (STATUS_STYLES[order.status] || {}) : {};
   const advisor  = order ? users.find(u => u.id === order.advisorId) : null;
   const comments    = order?.comments    || [];
   const attachments = order?.attachments || [];
 
-  if (!order) {
+  if (loading) {
     return (
       <div className="text-center py-20">
-        <p className="text-gray-500">Pedido no encontrado</p>
+        <p className="text-gray-400 text-sm">Cargando pedido…</p>
+      </div>
+    );
+  }
+
+  if (error || !order) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-gray-500">{error || 'Pedido no encontrado'}</p>
         <button onClick={() => navigate('/cliente/pedidos')} className="mt-4 text-blue-700 text-sm font-medium">
           Volver a mis pedidos
         </button>

@@ -6,7 +6,7 @@ import { STATUS_STYLES, formatCOP, statusLabel } from '../../data/mockData';
 import { ordersApi } from '../../services/api';
 
 export default function ClientOrders() {
-  const { orders, users, products, addToCart, clearCart } = useApp();
+  const { orders, users, addToCart, clearCart } = useApp();
   const { currentUser }   = useAuth();
   const navigate        = useNavigate();
   const isReadOnly = currentUser?.clientRole === 'admin_empresa';
@@ -20,16 +20,17 @@ export default function ClientOrders() {
         alert('El pedido no tiene productos para repetir.');
         return;
       }
-      // Carga al carrito usando el precio actual del catalogo (no el snapshot)
+      // Cargamos al carrito desde el snapshot del pedido (productName, unit,
+      // unitPrice). El backend re-resuelve el precio al confirmar el nuevo
+      // pedido y rechaza con 409 si el actual difiere — el usuario verá la
+      // discrepancia en la pantalla de confirmación.
       clearCart();
-      let missing = 0;
       for (const it of items) {
-        const product = products.find((p) => p.id === it.productId);
-        if (!product) { missing++; continue; }
-        addToCart(product, it.quantity, product.price);
-      }
-      if (missing > 0) {
-        alert(`${missing} producto(s) ya no están disponibles. Los demás se agregaron al carrito.`);
+        addToCart(
+          { id: it.productId, name: it.productName, unit: it.unit },
+          it.quantity,
+          it.unitPrice,
+        );
       }
       navigate('/cliente/confirmar-pedido');
     } catch (err) {

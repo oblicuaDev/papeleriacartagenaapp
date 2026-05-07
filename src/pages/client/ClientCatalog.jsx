@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useOutletContext } from "react-router-dom";
 import {
   ShoppingCart,
@@ -10,11 +10,16 @@ import {
   Package,
   Filter,
   Sparkles,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useApp } from "../../context/AppContext";
 import { useAuth } from "../../context/AuthContext";
+import { catalogApi } from "../../services/api";
 import { formatCOP } from "../../data/mockData";
 import productFallback from "../../product.webp";
+
+const PAGE_SIZE = 24;
 
 const CATEGORY_COLORS = [
   "bg-blue-100 text-blue-700",
@@ -152,14 +157,57 @@ function ProductModal({
 export default function ClientCatalog() {
   const context = useOutletContext() || {};
   const headerSearch = context.search || "";
-  const { products, categories, addToCart, orders } = useApp();
+  const { categories, addToCart, orders } = useApp();
   const { currentUser } = useAuth();
   const isReadOnly = currentUser?.clientRole === "admin_empresa";
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [viewMode, setViewMode] = useState("grid");
   const [modalProduct, setModalProduct] = useState(null);
+  const [page, setPage] = useState(1);
 
-  const search = headerSearch;
+  // Debounce del search del header (300ms) — evita un fetch por tecla.
+  const [debouncedSearch, setDebouncedSearch] = useState(headerSearch);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(headerSearch), 300);
+    return () => clearTimeout(t);
+  }, [headerSearch]);
+
+  // Resetea página al cambiar filtros/búsqueda.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, selectedCategory]);
+
+  // Fetch server-side: backend filtra por search + categoryId y pagina.
+  const [products, setProducts] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const reqIdRef = useRef(0);
+
+  useEffect(() => {
+    const myReqId = ++reqIdRef.current;
+    setLoading(true);
+    const params = { page, limit: PAGE_SIZE };
+    if (debouncedSearch) params.search = debouncedSearch;
+    if (selectedCategory) params.categoryId = selectedCategory;
+
+    catalogApi
+      .list(params)
+      .then((res) => {
+        if (myReqId !== reqIdRef.current) return; // descarta respuesta vieja
+        setProducts(Array.isArray(res) ? res : (res.data ?? []));
+        setTotal(typeof res?.total === "number" ? res.total : 0);
+      })
+      .catch((err) => {
+        if (myReqId !== reqIdRef.current) return;
+        console.error("[catalog] fetch error:", err);
+        setProducts([]);
+        setTotal(0);
+      })
+      .finally(() => {
+        if (myReqId !== reqIdRef.current) return;
+        setLoading(false);
+      });
+  }, [debouncedSearch, selectedCategory, page]);
 
   function getCategoryName(id) {
     return categories.find((c) => c.id === id)?.name || "—";
@@ -170,41 +218,32 @@ export default function ClientCatalog() {
     return CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
   }
 
-  const safeProducts = Array.isArray(products) ? products : [];
-
-  // Productos sugeridos: top 6 mas pedidos por el usuario en su historial
+  // Sugeridos: derivados del historial del usuario en `orders`.
+  // Usamos el snapshot de order_items (productId, productName, unitPrice, unit, sku),
+  // que es independiente del catálogo cargado en pantalla.
   const suggestedProducts = useMemo(() => {
     if (!currentUser || !orders?.length) return [];
     const myOrders = orders.filter((o) => o.clientId === currentUser.id);
-    const qtyById = {};
+    const agg = {};
     for (const o of myOrders) {
       for (const it of o.items || []) {
-        qtyById[it.productId] = (qtyById[it.productId] || 0) + it.quantity;
+        if (!agg[it.productId]) {
+          agg[it.productId] = {
+            id: it.productId,
+            name: it.productName,
+            sku: it.sku,
+            unit: it.unit,
+            price: it.unitPrice,
+            qty: 0,
+          };
+        }
+        agg[it.productId].qty += it.quantity;
       }
     }
-    const sortedIds = Object.entries(qtyById)
-      .sort((a, b) => b[1] - a[1])
-      .map(([id]) => Number(id));
-    return sortedIds
-      .map((id) => safeProducts.find((p) => p.id === id))
-      .filter(Boolean)
+    return Object.values(agg)
+      .sort((a, b) => b.qty - a.qty)
       .slice(0, 6);
-  }, [orders, currentUser, safeProducts]);
-
-  const filtered = safeProducts.filter((p) => {
-    const pName = p.name || "";
-    const pSku = p.sku || "";
-
-    const matchSearch =
-      pName.toLowerCase().includes(search.toLowerCase()) ||
-      pSku.toLowerCase().includes(search.toLowerCase());
-
-    const matchCat = selectedCategory
-      ? p.categoryId === selectedCategory
-      : true;
-
-    return matchSearch && matchCat;
-  });
+  }, [orders, currentUser]);
 
   function handleAdd(product, qty) {
     addToCart(product, qty, product.price);
@@ -215,7 +254,17 @@ export default function ClientCatalog() {
     handleAdd(product, 1);
   }
 
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const showingFrom = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const showingTo = Math.min(page * PAGE_SIZE, total);
   const modalPrice = modalProduct ? modalProduct.price : 0;
+  const showSuggested =
+    !isReadOnly &&
+    suggestedProducts.length > 0 &&
+    !debouncedSearch &&
+    !selectedCategory &&
+    page === 1;
+
   return (
     <div className="space-y-5">
       <div>
@@ -223,19 +272,25 @@ export default function ClientCatalog() {
           Catálogo de Productos
         </h2>
         <p className="text-sm text-gray-500 mt-1">
-          {filtered.length} productos disponibles
+          {loading
+            ? "Cargando…"
+            : total === 0
+              ? "0 productos"
+              : `Mostrando ${showingFrom}–${showingTo} de ${total} productos`}
         </p>
       </div>
 
       {/* Productos sugeridos según historial */}
-      {!isReadOnly && suggestedProducts.length > 0 && !search && !selectedCategory && (
+      {showSuggested && (
         <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border border-blue-100 p-5">
           <div className="flex items-center gap-2 mb-3">
             <Sparkles className="w-4 h-4 text-purple-600" />
             <h3 className="text-sm font-semibold text-gray-800">
               Sugeridos para ti
             </h3>
-            <span className="text-xs text-gray-500">basado en tus pedidos anteriores</span>
+            <span className="text-xs text-gray-500">
+              basado en tus pedidos anteriores
+            </span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {suggestedProducts.map((product) => (
@@ -311,7 +366,7 @@ export default function ClientCatalog() {
       {/* Grid View */}
       {viewMode === "grid" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-          {filtered.map((product) => {
+          {products.map((product) => {
             const price = product.price;
             return (
               <div
@@ -360,7 +415,7 @@ export default function ClientCatalog() {
               </div>
             );
           })}
-          {filtered.length === 0 && (
+          {!loading && products.length === 0 && (
             <div className="col-span-4 py-16 text-center">
               <Package className="w-12 h-12 text-gray-200 mx-auto mb-3" />
               <p className="text-gray-400">No se encontraron productos</p>
@@ -390,7 +445,7 @@ export default function ClientCatalog() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filtered.map((product) => {
+                {products.map((product) => {
                   const price = product.price;
                   return (
                     <tr
@@ -440,7 +495,7 @@ export default function ClientCatalog() {
                     </tr>
                   );
                 })}
-                {filtered.length === 0 && (
+                {!loading && products.length === 0 && (
                   <tr>
                     <td
                       colSpan={isReadOnly ? 4 : 5}
@@ -452,6 +507,33 @@ export default function ClientCatalog() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Paginador */}
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-between bg-white border border-gray-100 rounded-xl px-4 py-3">
+          <p className="text-xs text-gray-500">
+            Página {page} de {totalPages}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              Anterior
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              Siguiente
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       )}

@@ -16,6 +16,29 @@ export { ordersApi };
 
 const AppContext = createContext(null);
 
+// Itera todas las páginas de un endpoint paginado hasta agotar `total`.
+// Backend cap actual: 1000 por página. Asumimos response { data, total, page, limit }.
+async function fetchAllPaginated(apiFn, baseParams = {}, pageSize = 1000) {
+  const all = [];
+  let page = 1;
+  let total = Infinity;
+  let firstResponse = null;
+  while (all.length < total) {
+    const res = await apiFn({ ...baseParams, page, limit: pageSize });
+    if (!firstResponse) firstResponse = res;
+    const rows = Array.isArray(res) ? res : (res.data ?? []);
+    all.push(...rows);
+    if (Array.isArray(res)) { total = rows.length; break; }
+    total = typeof res.total === 'number' ? res.total : rows.length;
+    if (rows.length === 0 || rows.length < pageSize) break;
+    page += 1;
+  }
+  // Logs temporales — eliminar tras validar carga completa
+  console.log('[catalog/products] response sample:', firstResponse);
+  console.log('[catalog/products] total reportado:', total, '— cargados:', all.length, '— páginas:', page);
+  return all;
+}
+
 export function AppProvider({ children }) {
   const { currentUser } = useAuth();
 
@@ -49,7 +72,7 @@ export function AppProvider({ children }) {
 
     if (role === "admin") {
       loaders.push(
-        productsApi.list({ active: true, limit: 100 }).then((r) => r.data ?? r),
+        fetchAllPaginated(productsApi.list, { active: true }),
         priceListsApi.list(),
         branchesApi.list({ active: true }),
         ordersApi.list({ limit: 100 }).then((r) => r.data ?? r),
@@ -60,16 +83,17 @@ export function AppProvider({ children }) {
       // Cargamos TODOS los users (no solo clients) para poder mostrar repartidores
       // disponibles al momento de asignar un pedido.
       loaders.push(
-        productsApi.list({ active: true, limit: 100 }).then((r) => r.data ?? r),
+        fetchAllPaginated(productsApi.list, { active: true }),
         ordersApi.list({ limit: 100 }).then((r) => r.data ?? r),
         companiesApi.list({ active: true }),
         usersApi.list({ limit: 300 }),
       );
     } else if (role === "client") {
-      // Catálogo + pedidos siempre. Cargamos catalogo completo (limit alto)
-      // para que el creador de pedidos vea TODOS los productos disponibles.
+      // El catálogo se consulta server-side desde ClientCatalog (paginado +
+      // filtros en backend), por eso aquí no precargamos `products`. Otras
+      // vistas del cliente (detalle/repetir pedido) usan el snapshot del
+      // pedido en order_items, que ya viaja con productName/sku/unitPrice.
       loaders.push(
-        catalogApi.list({ limit: 500 }).then((r) => r.data ?? r),
         ordersApi.list({ limit: 100 }).then((r) => r.data ?? r),
         usersApi.list({ limit: 200 }),
         companiesApi.list({ active: true }),
@@ -98,10 +122,9 @@ export function AppProvider({ children }) {
         setCompanies(get(3) || []);
         setUsers(get(4) || []);
       } else if (role === "client") {
-        setProducts(get(1) || []);
-        setOrders(get(2) || []);
-        setUsers(get(3) || []);
-        setCompanies(get(4) || []);
+        setOrders(get(1) || []);
+        setUsers(get(2) || []);
+        setCompanies(get(3) || []);
       } else if (role === "delivery") {
         setOrders(get(1) || []);
       }
@@ -185,14 +208,9 @@ export function AppProvider({ children }) {
 
   async function refreshProducts() {
     const role = currentUser?.role;
-    if (role === "delivery") return; // delivery no consulta catalogo
-    if (role === "client") {
-      const res = await catalogApi.list({ limit: 500 });
-      setProducts(res.data ?? res);
-    } else {
-      const res = await productsApi.list({ active: true, limit: 100 });
-      setProducts(res.data ?? res);
-    }
+    if (role === "delivery" || role === "client") return; // estos roles no usan products global
+    const all = await fetchAllPaginated(productsApi.list, { active: true });
+    setProducts(all);
   }
 
   async function refreshCompanies() {

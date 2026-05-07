@@ -38,11 +38,7 @@ function roleBadge(role) {
 export default function ClientOrderDetail() {
   const { orderId } = useParams();
   const navigate    = useNavigate();
-  const { orders, products, users } = useApp();
-
-  function getSku(productId) {
-    return products.find(p => p.id === productId)?.sku || '—';
-  }
+  const { orders, users } = useApp();
 
   const order    = orders.find(o => o.id === orderId);
   const style    = order ? (STATUS_STYLES[order.status] || {}) : {};
@@ -135,7 +131,7 @@ export default function ClientOrderDetail() {
                 <tbody className="divide-y divide-gray-100">
                   {(order.items || []).map((item, idx) => (
                     <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{getSku(item.productId)}</td>
+                      <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{item.sku || '—'}</td>
                       <td className="px-5 py-3 text-sm font-medium text-gray-800">{item.productName}</td>
                       <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                       <td className="px-5 py-3 text-sm text-gray-700 text-center">{item.quantity}</td>

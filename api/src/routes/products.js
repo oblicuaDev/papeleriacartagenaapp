@@ -35,7 +35,7 @@ async function resolveChainForRequest(req) {
 router.get('/', async (req, res) => {
   const { categoryId, active, search, page = 1, limit = 20 } = req.query;
   const pageNum = Math.max(1, parseInt(page));
-  const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+  const limitNum = Math.min(1000, Math.max(1, parseInt(limit)));
   const offset = (pageNum - 1) * limitNum;
 
   // condParams indexa desde $1 y se reutiliza igual en la count query.

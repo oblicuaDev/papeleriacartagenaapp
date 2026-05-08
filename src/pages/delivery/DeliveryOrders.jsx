@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Truck, Package, Calendar, ArrowRight, CheckCircle2, MapPin, ClipboardCheck } from 'lucide-react';
+import { Truck, Package, Calendar, ArrowRight, CheckCircle2, MapPin } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { STATUS_STYLES, formatCOP, statusLabel } from '../../data/mockData';
 
-// El repartidor maneja el flujo completo desde aprobado hasta entregado.
+// El repartidor opera desde Alistamiento (asesor ya valido disponibilidad).
 const DELIVERY_TABS = [
-  { value: 'Pendiente',              label: 'Aprobados' },
-  { value: 'Validar disponibilidad', label: 'Por validar' },
   { value: 'Alistamiento',           label: 'Para despachar' },
   { value: 'En Ruta',                label: 'En ruta' },
   { value: 'Entregado',              label: 'Entregados' },
@@ -140,33 +138,6 @@ export default function DeliveryOrders() {
                     Ver detalle
                   </button>
                 </div>
-
-                {/* Acciones inline segun estado */}
-                {tab === 'Pendiente' && (
-                  <div className="border-t border-gray-100 bg-gray-50 px-5 py-3 flex items-center justify-end gap-2">
-                    <button
-                      onClick={() => handleAdvance(order, 'Validar disponibilidad')}
-                      disabled={updating === order.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50"
-                    >
-                      <ClipboardCheck className="w-3.5 h-3.5" />
-                      Iniciar validación
-                    </button>
-                  </div>
-                )}
-
-                {tab === 'Validar disponibilidad' && (
-                  <div className="border-t border-gray-100 bg-gray-50 px-5 py-3 flex items-center justify-end gap-2">
-                    <button
-                      onClick={() => handleAdvance(order, 'Alistamiento')}
-                      disabled={updating === order.id}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50"
-                    >
-                      <ArrowRight className="w-3.5 h-3.5" />
-                      Pasar a alistamiento
-                    </button>
-                  </div>
-                )}
 
                 {tab === 'Alistamiento' && (
                   <div className="border-t border-gray-100 bg-gray-50 px-5 py-3 flex items-center gap-3">

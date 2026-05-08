@@ -102,4 +102,88 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /catalog/related?productId=N&limit=6
+// Devuelve productos sugeridos a partir de las categorias relacionadas con la
+// categoria del producto. Si no hay relaciones (o no alcanzan el limite),
+// completa con productos aleatorios de la misma categoria. Excluye el propio
+// producto y prioriza activos/disponibles.
+router.get('/related', async (req, res) => {
+  const { id: userId, companyId } = req.user;
+  const productId = parseInt(req.query.productId);
+  const limit = Math.min(24, Math.max(1, parseInt(req.query.limit) || 6));
+
+  if (!Number.isInteger(productId) || productId <= 0) {
+    return res.status(422).json({ error: 'productId invalido' });
+  }
+
+  try {
+    const { rows: pRows } = await pool.query(
+      `SELECT id, category_id FROM products WHERE id = $1`, [productId]
+    );
+    if (!pRows[0]) return res.status(404).json({ error: 'Producto no encontrado' });
+    const categoryId = pRows[0].category_id;
+
+    const chain = await resolvePriceListChain({ companyId, userId });
+    const listIdParams = chain.map((_, i) => `$${i + 1}`);
+    const { select: priceSelect, join: priceJoin } = priceSqlFragmentChain({
+      alias: 'p',
+      listIdParams,
+    });
+
+    async function pickFrom(categoryIds, exclude, n) {
+      if (!categoryIds.length || n <= 0) return [];
+      const params = [...chain];
+      const catIdx = params.length + 1;
+      params.push(categoryIds);
+      const excludeIdx = params.length + 1;
+      params.push(exclude);
+      const limitIdx = params.length + 1;
+      params.push(n);
+      const { rows } = await pool.query(
+        `SELECT p.id, p.name, p.sku,
+                p.category_id AS "categoryId",
+                c.name AS "categoryName",
+                ${priceSelect} AS price,
+                p.stock, p.unit,
+                p.image_url AS "imageUrl"
+         FROM products p
+         JOIN categories c ON c.id = p.category_id
+         ${priceJoin}
+         WHERE p.active = true
+           AND c.active = true
+           AND p.category_id = ANY($${catIdx}::int[])
+           AND NOT (p.id = ANY($${excludeIdx}::int[]))
+         ORDER BY (p.stock > 0) DESC, RANDOM()
+         LIMIT $${limitIdx}`,
+        params
+      );
+      return rows;
+    }
+
+    const { rows: relCatRows } = await pool.query(
+      `SELECT related_category_id FROM category_relations WHERE category_id = $1`,
+      [categoryId]
+    );
+    const relatedCatIds = relCatRows.map(r => r.related_category_id);
+
+    const exclude = [productId];
+    let result = [];
+    if (relatedCatIds.length) {
+      result = await pickFrom(relatedCatIds, exclude, limit);
+      exclude.push(...result.map(r => r.id));
+    }
+
+    if (result.length < limit) {
+      const remaining = limit - result.length;
+      const fallback = await pickFrom([categoryId], exclude, remaining);
+      result = result.concat(fallback);
+    }
+
+    return res.json({ data: result });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 export default router;

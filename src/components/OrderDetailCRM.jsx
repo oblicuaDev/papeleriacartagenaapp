@@ -119,6 +119,270 @@ function handleDownloadAttachment(att) {
   document.body.removeChild(a);
 }
 
+// ── Items Card (read-only / editable advisor en Validar disponibilidad) ────
+
+function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
+  const isAdvisor = currentUser?.role === "advisor";
+  const isAdmin = currentUser?.role === "admin";
+  const canEdit = (isAdvisor || isAdmin) && order.status === "Validar disponibilidad";
+
+  const [editing, setEditing] = useState(false);
+  const [localItems, setLocalItems] = useState(order.items || []);
+  const [localTotal, setLocalTotal] = useState(order.total);
+  useEffect(() => {
+    setLocalItems(order.items || []);
+    setLocalTotal(order.total);
+  }, [order.id]);
+  const [draft, setDraft] = useState(() =>
+    (order.items || []).map((it) => ({
+      productId: it.productId,
+      productName: it.productName,
+      unit: it.unit,
+      unitPrice: Number(it.unitPrice),
+      quantity: Number(it.quantity),
+      removed: false,
+    })),
+  );
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [errMsg, setErrMsg] = useState(null);
+
+  function startEdit() {
+    setDraft(
+      (localItems || []).map((it) => ({
+        productId: it.productId,
+        productName: it.productName,
+        unit: it.unit,
+        unitPrice: Number(it.unitPrice),
+        quantity: Number(it.quantity),
+        removed: false,
+      })),
+    );
+    setReason("");
+    setErrMsg(null);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setErrMsg(null);
+  }
+
+  function setQty(productId, qty) {
+    const n = Math.max(1, Math.trunc(Number(qty) || 0));
+    setDraft((prev) =>
+      prev.map((it) => (it.productId === productId ? { ...it, quantity: n } : it)),
+    );
+  }
+
+  function toggleRemove(productId) {
+    setDraft((prev) =>
+      prev.map((it) =>
+        it.productId === productId ? { ...it, removed: !it.removed } : it,
+      ),
+    );
+  }
+
+  const hasChanges = (() => {
+    const orig = new Map((localItems || []).map((it) => [it.productId, it]));
+    return draft.some((it) => {
+      const o = orig.get(it.productId);
+      if (!o) return false;
+      if (it.removed) return true;
+      return Number(o.quantity) !== Number(it.quantity);
+    });
+  })();
+
+  const remaining = draft.filter((it) => !it.removed).length;
+  const projectedTotal = draft.reduce(
+    (s, it) => (it.removed ? s : s + it.unitPrice * it.quantity),
+    0,
+  );
+
+  async function save() {
+    setErrMsg(null);
+    if (!reason.trim()) {
+      setErrMsg("Comentario obligatorio para guardar cambios.");
+      return;
+    }
+    if (!hasChanges) {
+      setErrMsg("No hay cambios.");
+      return;
+    }
+    if (remaining === 0) {
+      setErrMsg("No puedes eliminar todos los productos. Si el pedido no es viable, rechazalo.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        items: draft
+          .filter((it) => !it.removed)
+          .map((it) => ({ productId: it.productId, quantity: it.quantity })),
+        reason: reason.trim(),
+      };
+      const res = await ordersApi.updateItems(order.id, payload);
+      const newItems = draft
+        .filter((it) => !it.removed)
+        .map((it) => ({
+          productId: it.productId,
+          productName: it.productName,
+          sku: it.sku,
+          unit: it.unit,
+          unitPrice: it.unitPrice,
+          quantity: it.quantity,
+        }));
+      const newTotal = res?.total ?? projectedTotal;
+      setLocalItems(newItems);
+      setLocalTotal(newTotal);
+      onSaved && onSaved({ items: newItems, total: newTotal });
+      await (refreshComments && refreshComments());
+      setEditing(false);
+    } catch (err) {
+      setErrMsg(err?.message || "No se pudo guardar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
+        <Package className="w-4 h-4 text-blue-600" />
+        <h3 className="text-sm font-semibold text-gray-800">Productos del pedido</h3>
+        {canEdit && !editing && (
+          <button
+            onClick={startEdit}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition"
+          >
+            Validar disponibilidad
+          </button>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="bg-gray-50">
+              <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">SKU</th>
+              <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">Producto</th>
+              <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">Unidad</th>
+              <th className="text-center text-xs font-semibold text-gray-500 uppercase px-5 py-3">Cant.</th>
+              <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Precio unit.</th>
+              <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Subtotal</th>
+              {editing && <th className="px-5 py-3"></th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {!editing && (localItems || []).map((item, idx) => (
+              <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{getSku(item.productId)}</td>
+                <td className="px-5 py-3 text-sm font-medium text-gray-800">{item.productName}</td>
+                <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
+                <td className="px-5 py-3 text-sm text-gray-700 text-center">{item.quantity}</td>
+                <td className="px-5 py-3 text-sm text-gray-700 text-right">{formatCOP(item.unitPrice)}</td>
+                <td className="px-5 py-3 text-sm font-semibold text-gray-800 text-right">
+                  {formatCOP(item.unitPrice * item.quantity)}
+                </td>
+              </tr>
+            ))}
+
+            {editing && draft.map((item) => (
+              <tr key={item.productId} className={item.removed ? "bg-red-50" : "hover:bg-gray-50"}>
+                <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{getSku(item.productId)}</td>
+                <td className={`px-5 py-3 text-sm font-medium ${item.removed ? "line-through text-gray-400" : "text-gray-800"}`}>
+                  {item.productName}
+                </td>
+                <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
+                <td className="px-5 py-3 text-sm text-gray-700 text-center">
+                  <input
+                    type="number"
+                    min={1}
+                    disabled={item.removed}
+                    value={item.quantity}
+                    onChange={(e) => setQty(item.productId, e.target.value)}
+                    className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  />
+                </td>
+                <td className="px-5 py-3 text-sm text-gray-700 text-right">{formatCOP(item.unitPrice)}</td>
+                <td className={`px-5 py-3 text-sm font-semibold text-right ${item.removed ? "line-through text-gray-400" : "text-gray-800"}`}>
+                  {formatCOP(item.unitPrice * item.quantity)}
+                </td>
+                <td className="px-5 py-3 text-right">
+                  <button
+                    onClick={() => toggleRemove(item.productId)}
+                    className={`text-xs px-2 py-1 rounded-lg transition ${
+                      item.removed
+                        ? "text-blue-700 hover:bg-blue-50"
+                        : "text-red-600 hover:bg-red-50"
+                    }`}
+                  >
+                    {item.removed ? "Restaurar" : "Eliminar"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-gray-50 border-t-2 border-gray-200">
+              <td colSpan={editing ? 5 : 5} className="px-5 py-3 text-sm font-bold text-gray-700 text-right">
+                Total
+              </td>
+              <td className="px-5 py-3 text-base font-bold text-blue-700 text-right">
+                {formatCOP(editing ? projectedTotal : localTotal)}
+              </td>
+              {editing && <td></td>}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {editing && (
+        <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">
+              Motivo de la modificacion <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={2}
+              maxLength={1000}
+              placeholder="Ej: producto agotado, ajuste de cantidad por bodega..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            />
+          </div>
+          {errMsg && (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-xs">
+              {errMsg}
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={cancelEdit}
+              disabled={saving}
+              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-white transition disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={save}
+              disabled={saving || !hasChanges || !reason.trim()}
+              className="flex items-center gap-2 px-5 py-2 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-300 text-white rounded-lg text-sm font-semibold transition"
+            >
+              <Save className="w-4 h-4" />
+              {saving ? "Guardando..." : "Guardar cambios"}
+            </button>
+            <span className="text-xs text-gray-500 ml-auto">
+              {remaining} producto{remaining !== 1 ? "s" : ""} · Total proyectado {formatCOP(projectedTotal)}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export default function OrderDetailCRM({
@@ -137,6 +401,8 @@ export default function OrderDetailCRM({
   // y repartidor maneja el resto.
   const isAdvisor = currentUser?.role === "advisor";
   const canEditStatus = editable && !isAdvisor;
+  // Pedido entregado: bloquear asignaciones y cambios logisticos para todos los roles.
+  const isDelivered = order.status === "Entregado";
   const [status, setStatus] = useState(order.status);
   const [carrier, setCarrier] = useState(order.carrier || "");
   const [saved, setSaved] = useState(false);
@@ -530,6 +796,12 @@ export default function OrderDetailCRM({
                 </div>
               )}
 
+              {isDelivered && (canAssign || showDeliveryAssign) && (
+                <div className="bg-gray-50 border border-gray-200 text-gray-600 text-xs rounded-lg px-3 py-2">
+                  Pedido entregado: no se permiten reasignaciones ni cambios logisticos.
+                </div>
+              )}
+
               {/* Assign advisor (admin only) */}
               {canAssign && (
                 <div>
@@ -538,10 +810,11 @@ export default function OrderDetailCRM({
                   </label>
                   <select
                     value={order.advisorId || ""}
+                    disabled={isDelivered}
                     onChange={(e) =>
                       handleAssign({ advisorId: Number(e.target.value) || null })
                     }
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   >
                     <option value="">Sin asignar</option>
                     {advisors.map((a) => (
@@ -562,12 +835,13 @@ export default function OrderDetailCRM({
                   </label>
                   <select
                     value={order.deliveryId || ""}
+                    disabled={isDelivered}
                     onChange={(e) =>
                       handleAssign({
                         deliveryId: e.target.value ? Number(e.target.value) : null,
                       })
                     }
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                   >
                     <option value="">Sin asignar</option>
                     {deliverers.length === 0 && (
@@ -620,81 +894,23 @@ export default function OrderDetailCRM({
             </div>
           )}
 
-          {/* Products table */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
-              <Package className="w-4 h-4 text-blue-600" />
-              <h3 className="text-sm font-semibold text-gray-800">
-                Productos del pedido
-              </h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">
-                      SKU
-                    </th>
-                    <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">
-                      Producto
-                    </th>
-                    <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">
-                      Unidad
-                    </th>
-                    <th className="text-center text-xs font-semibold text-gray-500 uppercase px-5 py-3">
-                      Cant.
-                    </th>
-                    <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">
-                      Precio unit.
-                    </th>
-                    <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">
-                      Subtotal
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {(order.items || []).map((item, idx) => (
-                    <tr
-                      key={idx}
-                      className="hover:bg-gray-50 transition-colors"
-                    >
-                      <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">
-                        {getSku(item.productId)}
-                      </td>
-                      <td className="px-5 py-3 text-sm font-medium text-gray-800">
-                        {item.productName}
-                      </td>
-                      <td className="px-5 py-3 text-sm text-gray-500">
-                        {item.unit}
-                      </td>
-                      <td className="px-5 py-3 text-sm text-gray-700 text-center">
-                        {item.quantity}
-                      </td>
-                      <td className="px-5 py-3 text-sm text-gray-700 text-right">
-                        {formatCOP(item.unitPrice)}
-                      </td>
-                      <td className="px-5 py-3 text-sm font-semibold text-gray-800 text-right">
-                        {formatCOP(item.unitPrice * item.quantity)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td
-                      colSpan={5}
-                      className="px-5 py-3 text-sm font-bold text-gray-700 text-right"
-                    >
-                      Total
-                    </td>
-                    <td className="px-5 py-3 text-base font-bold text-blue-700 text-right">
-                      {formatCOP(order.total)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
+          {/* Products table — editable solo para advisor en Validar disponibilidad */}
+          <ItemsCard
+            order={order}
+            getSku={getSku}
+            currentUser={currentUser}
+            onSaved={(updated) => {
+              order.items = updated.items;
+              order.total = updated.total;
+              setTimelineRefreshKey((k) => k + 1);
+            }}
+            refreshComments={async () => {
+              try {
+                const fresh = await ordersApi.get(order.id);
+                if (Array.isArray(fresh?.comments)) setLocalComments(fresh.comments);
+              } catch {}
+            }}
+          />
 
           {/* Client notes (read-only always) */}
           {order.notes && (
@@ -739,6 +955,9 @@ export default function OrderDetailCRM({
                           )}
                           {ev.eventType === "attachment" && (
                             <Paperclip className="w-3.5 h-3.5" />
+                          )}
+                          {ev.eventType === "item_change" && (
+                            <Package className="w-3.5 h-3.5" />
                           )}
                         </div>
                         {idx < timeline.length - 1 && (
@@ -799,6 +1018,32 @@ export default function OrderDetailCRM({
                                     ({ATTACH_TYPE_LABEL[ev.payload.type]})
                                   </span>
                                 )}
+                            </>
+                          )}
+                          {ev.eventType === "item_change" && (
+                            <>
+                              {ev.payload?.action === "removed" ? (
+                                <>
+                                  Elimino{" "}
+                                  <span className="font-medium">
+                                    {ev.payload?.productName}
+                                  </span>
+                                  {" "}(cant. {ev.payload?.prevQuantity})
+                                </>
+                              ) : (
+                                <>
+                                  Ajusto{" "}
+                                  <span className="font-medium">
+                                    {ev.payload?.productName}
+                                  </span>
+                                  : {ev.payload?.prevQuantity} → {ev.payload?.newQuantity}
+                                </>
+                              )}
+                              {ev.payload?.reason && (
+                                <span className="text-gray-500">
+                                  {" "}— {ev.payload.reason}
+                                </span>
+                              )}
                             </>
                           )}
                         </div>

@@ -102,6 +102,8 @@ export const categoriesApi = {
   create: (data)        => post('/categories', data),
   update: (id, data)    => put(`/categories/${id}`, data),
   remove: (id)          => del(`/categories/${id}`),
+  related:    (id)              => get(`/categories/${id}/related`),
+  setRelated: (id, ids)         => put(`/categories/${id}/related`, { relatedCategoryIds: ids }),
 };
 
 // ── Price Lists ─────────────────────────────────────────────
@@ -134,6 +136,8 @@ export const productsApi = {
 // ── Catalog (clientes) ──────────────────────────────────────
 export const catalogApi = {
   list: (params = {}) => get('/catalog?' + new URLSearchParams(params)),
+  related: (productId, limit = 6) =>
+    get(`/catalog/related?productId=${productId}&limit=${limit}`),
 };
 
 // ── Orders ──────────────────────────────────────────────────
@@ -142,6 +146,7 @@ export const ordersApi = {
   get:    (id)              => get(`/orders/${id}`),
   create: (data)            => post('/orders', data),
   update: (id, data)        => put(`/orders/${id}`, data),
+  updateItems: (id, data)   => put(`/orders/${id}/items`, data),
   timeline: (id)            => get(`/orders/${id}/timeline`),
   addComment:    (oId, txt) => post(`/orders/${oId}/comments`, { text: txt }),
   removeComment: (oId, cId) => del(`/orders/${oId}/comments/${cId}`),

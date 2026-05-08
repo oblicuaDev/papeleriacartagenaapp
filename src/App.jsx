@@ -25,6 +25,7 @@ import ClientStats from './pages/client/ClientStats';
 import AdvisorLayout from './pages/advisor/AdvisorLayout';
 import AdvisorOrders from './pages/advisor/AdvisorOrders';
 import AdvisorOrderDetail from './pages/advisor/AdvisorOrderDetail';
+import AdvisorCompanies from './pages/advisor/AdvisorCompanies';
 import DeliveryLayout from './pages/delivery/DeliveryLayout';
 import DeliveryOrders from './pages/delivery/DeliveryOrders';
 import DeliveryOrderDetail from './pages/delivery/DeliveryOrderDetail';
@@ -79,6 +80,7 @@ export default function App() {
             }
           >
             <Route index element={<AdvisorOrders />} />
+            <Route path="empresas" element={<AdvisorCompanies />} />
             <Route path="pedido/:orderId" element={<AdvisorOrderDetail />} />
           </Route>
           <Route

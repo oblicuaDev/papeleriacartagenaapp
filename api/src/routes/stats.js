@@ -249,6 +249,27 @@ router.get('/client', requireRole('client'), async (req, res) => {
     const ordersByStatus = {};
     for (const row of statusRows) ordersByStatus[row.status] = parseInt(row.count);
 
+    // Presupuesto anual: solo aplica al scope de empresa (admin_empresa).
+    // Gasto real = SUM(total) de pedidos ENTREGADOS de la empresa en el anio actual.
+    let annualBudget = null;
+    let budgetSpent = 0;
+    if (isCompanyWide) {
+      const [{ rows: cRows }, { rows: sRows }] = await Promise.all([
+        pool.query(`SELECT annual_budget FROM companies WHERE id = $1`, [companyId]),
+        pool.query(
+          `SELECT COALESCE(SUM(o.total), 0) AS spent
+           FROM orders o
+           JOIN users uc ON uc.id = o.client_id
+           WHERE uc.company_id = $1
+             AND o.status = 'Entregado'
+             AND DATE_PART('year', o.delivered_at) = DATE_PART('year', NOW())`,
+          [companyId]
+        ),
+      ]);
+      annualBudget = cRows[0]?.annual_budget != null ? parseFloat(cRows[0].annual_budget) : null;
+      budgetSpent = parseFloat(sRows[0].spent);
+    }
+
     return res.json({
       scope: isCompanyWide ? 'company' : isSupervisor ? 'sucursal' : 'self',
       totalOrders:      parseInt(totalRows[0].total),
@@ -259,6 +280,9 @@ router.get('/client', requireRole('client'), async (req, res) => {
       monthly:          monthlyRows.reverse(),
       topProducts:      topProdRows,
       topUsers:         topUserRows,
+      annualBudget,
+      budgetSpent,
+      budgetAvailable:  annualBudget != null ? Math.max(0, annualBudget - budgetSpent) : null,
     });
   } catch (err) {
     console.error(err);

@@ -30,17 +30,34 @@ function httpError(status, message) {
   return e;
 }
 
+function requireCompanyReader(req, res, next) {
+  const { role, clientRole } = req.user;
+  if (role === 'admin') return next();
+  if (role === 'advisor') return next();
+  if (role === 'client' && (clientRole === 'supervisor' || clientRole === 'admin_empresa')) {
+    return next();
+  }
+  return res.status(403).json({ error: 'No autorizado para este recurso' });
+}
+
 // GET /companies
-router.get('/', requireAdminOrSupervisor, async (req, res) => {
+router.get('/', requireCompanyReader, async (req, res) => {
   try {
     const { active, search } = req.query;
-    const { role, companyId } = req.user;
+    const { role, companyId, id: userId } = req.user;
     const params = [];
     const conditions = [];
 
-    // Supervisor solo ve su propia empresa
+    // Supervisor / admin_empresa solo ve su propia empresa.
     if (role === 'client') {
       conditions.push(`c.id = $${params.push(companyId)}`);
+    }
+    // Advisor ve solo las empresas asignadas a el (a nivel empresa O via sucursales).
+    if (role === 'advisor') {
+      conditions.push(
+        `(c.advisor_id = $${params.push(userId)}
+          OR EXISTS (SELECT 1 FROM sucursales s2 WHERE s2.company_id = c.id AND s2.advisor_id = $${params.push(userId)}))`
+      );
     }
     if (active !== undefined) {
       conditions.push(`c.active = $${params.push(active === 'true')}`);
@@ -68,24 +85,37 @@ router.get('/', requireAdminOrSupervisor, async (req, res) => {
   }
 });
 
+function parseAnnualBudget(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    const e = new Error('annualBudget debe ser un numero >= 0');
+    e.status = 422;
+    throw e;
+  }
+  return n;
+}
+
 // POST /companies
 router.post('/', requireRole('admin'), async (req, res) => {
   const {
     name, nit, email, phone, address, active = true,
-    advisorId, priceListId,
+    advisorId, priceListId, annualBudget,
   } = req.body;
   if (!name) return res.status(422).json({ error: 'name es requerido' });
 
   try {
     await assertAdvisorOrNull(advisorId);
     await assertPriceListOrNull(priceListId);
+    const budget = parseAnnualBudget(annualBudget);
 
     const { rows } = await pool.query(
-      `INSERT INTO companies (name, nit, email, phone, address, active, advisor_id, price_list_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      `INSERT INTO companies (name, nit, email, phone, address, active, advisor_id, price_list_id, annual_budget)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [
         name, nit || null, email || null, phone || null, address || null, active,
-        advisorId ?? null, priceListId ?? null,
+        advisorId ?? null, priceListId ?? null, budget ?? null,
       ]
     );
     return res.status(201).json(rows[0]);
@@ -125,10 +155,11 @@ router.get('/:id', requireAdminOrSupervisor, async (req, res) => {
 // PUT /companies/:id
 router.put('/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id);
-  const { name, nit, email, phone, address, active, advisorId, priceListId } = req.body;
+  const { name, nit, email, phone, address, active, advisorId, priceListId, annualBudget } = req.body;
   try {
     if (advisorId !== undefined)   await assertAdvisorOrNull(advisorId);
     if (priceListId !== undefined) await assertPriceListOrNull(priceListId);
+    const budget = parseAnnualBudget(annualBudget);
 
     const fields = [];
     const params = [];
@@ -140,6 +171,7 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     if (active      !== undefined) fields.push(`active        = $${params.push(active)}`);
     if (advisorId   !== undefined) fields.push(`advisor_id    = $${params.push(advisorId)}`);
     if (priceListId !== undefined) fields.push(`price_list_id = $${params.push(priceListId)}`);
+    if (annualBudget !== undefined) fields.push(`annual_budget = $${params.push(budget)}`);
     if (!fields.length) return res.status(422).json({ error: 'No hay campos para actualizar' });
 
     params.push(id);

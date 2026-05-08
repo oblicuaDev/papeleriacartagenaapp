@@ -322,7 +322,7 @@ export default function ClientApproveOrders() {
   async function confirmApprove() {
     setActionError(null);
     try {
-      await updateOrder(confirmOrder.id, { status: "Pendiente" });
+      await updateOrder(confirmOrder.id, { status: "Validar disponibilidad" });
       setConfirmOrder(null);
     } catch (err) {
       setActionError(err?.message || "No se pudo aprobar");

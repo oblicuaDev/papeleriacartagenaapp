@@ -252,16 +252,22 @@ export function renderPdfBuffer({ order, items }) {
  *
  * @returns {Promise<{ created: boolean, attachmentId?: number, fileUrl?: string }>}
  */
-export async function ensurePurchaseOrderPdf(orderId, generatedBy, db = pool) {
+export async function ensurePurchaseOrderPdf(orderId, generatedBy, db = pool, opts = {}) {
+  const { regenerate = false } = opts;
   // Idempotencia: si ya existe un PDF de orden de compra, no regeneramos
+  // (a menos que el caller lo fuerce, ej. tras modificar items).
   const { rows: existing } = await db.query(
     `SELECT id, file_url FROM order_attachments
      WHERE order_id = $1 AND type = 'purchase_order'
      LIMIT 1`,
     [orderId]
   );
-  if (existing[0]) {
+  if (existing[0] && !regenerate) {
     return { created: false, attachmentId: existing[0].id, fileUrl: existing[0].file_url };
+  }
+  if (existing[0] && regenerate) {
+    // Borramos el adjunto stale para que el nuevo refleje los cambios.
+    await db.query(`DELETE FROM order_attachments WHERE id = $1`, [existing[0].id]);
   }
 
   const { order, items } = await loadOrderContext(orderId, db);

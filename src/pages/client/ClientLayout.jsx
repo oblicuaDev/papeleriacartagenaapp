@@ -89,7 +89,7 @@ export default function ClientLayout() {
                 `px-3 py-1.5 rounded-lg text-sm font-medium transition ${isActive ? 'bg-white bg-opacity-20 text-white' : 'text-blue-200 hover:text-white hover:bg-white hover:bg-opacity-10'}`
               }
             >
-              Mis Pedidos
+              Pedidos
             </NavLink>
             <NavLink
               to="/cliente/estadisticas"

@@ -19,7 +19,7 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-const EMPTY_COMPANY  = { name: '', nit: '', email: '', phone: '', address: '', advisorId: '' };
+const EMPTY_COMPANY  = { name: '', nit: '', email: '', phone: '', address: '', advisorId: '', annualBudget: '' };
 const EMPTY_SUCURSAL = { name: '', address: '', city: '', advisorId: '', priceListId: '' };
 
 // Convierte "" -> null para selects opcionales (deja undefined fuera de payload)
@@ -53,12 +53,13 @@ export default function AdminCompanies() {
   function openEditCompany(company) {
     setEditingCompany(company);
     setCompanyForm({
-      name:      company.name      || '',
-      nit:       company.nit       || '',
-      email:     company.email     || '',
-      phone:     company.phone     || '',
-      address:   company.address   || '',
-      advisorId: company.advisorId ?? '',
+      name:         company.name         || '',
+      nit:          company.nit          || '',
+      email:        company.email        || '',
+      phone:        company.phone        || '',
+      address:      company.address      || '',
+      advisorId:    company.advisorId    ?? '',
+      annualBudget: company.annualBudget != null ? String(company.annualBudget) : '',
     });
     setShowCompanyModal(true);
   }
@@ -67,13 +68,15 @@ export default function AdminCompanies() {
   // Las listas de precios se asignan a las empresas desde "Listas de precios".
   async function handleSaveCompany() {
     if (!companyForm.name) return;
+    const budgetRaw = String(companyForm.annualBudget || '').trim();
     const payload = {
-      name:      companyForm.name,
-      nit:       companyForm.nit     || null,
-      email:     companyForm.email   || null,
-      phone:     companyForm.phone   || null,
-      address:   companyForm.address || null,
-      advisorId: nullable(companyForm.advisorId),
+      name:         companyForm.name,
+      nit:          companyForm.nit     || null,
+      email:        companyForm.email   || null,
+      phone:        companyForm.phone   || null,
+      address:      companyForm.address || null,
+      advisorId:    nullable(companyForm.advisorId),
+      annualBudget: budgetRaw === '' ? null : Number(budgetRaw),
     };
     if (editingCompany) {
       await companiesApi.update(editingCompany.id, payload);
@@ -328,6 +331,20 @@ export default function AdminCompanies() {
                 onChange={e => setCompanyForm(f => ({ ...f, address: e.target.value }))}
                 placeholder="Cra 7 # 15-30, Bogotá"
               />
+            </div>
+
+            <div>
+              <label className={labelClass}>Presupuesto anual (COP)</label>
+              <input
+                type="number"
+                min="0"
+                step="1000"
+                className={inputClass}
+                value={companyForm.annualBudget}
+                onChange={e => setCompanyForm(f => ({ ...f, annualBudget: e.target.value }))}
+                placeholder="Ej. 50000000"
+              />
+              <p className="text-xs text-gray-400 mt-1">Se descuenta con el total de los pedidos entregados del anio actual.</p>
             </div>
 
             <div>

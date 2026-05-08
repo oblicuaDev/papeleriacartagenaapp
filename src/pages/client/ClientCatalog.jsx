@@ -12,6 +12,8 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  Info,
+  CheckCircle2,
 } from "lucide-react";
 import { useApp } from "../../context/AppContext";
 import { useAuth } from "../../context/AuthContext";
@@ -50,12 +52,21 @@ function ProductModal({
   onClose,
   onAdd,
   readOnly,
+  related,
+  onPickRelated,
 }) {
   const [qty, setQty] = useState(1);
+  const [added, setAdded] = useState(false);
+
+  // Reset al cambiar de producto (relacionado seleccionado)
+  useEffect(() => {
+    setAdded(false);
+    setQty(1);
+  }, [product?.id]);
 
   function handleAdd() {
     onAdd(qty);
-    onClose();
+    setAdded(true);
   }
 
   return (
@@ -116,7 +127,7 @@ function ProductModal({
           </div>
 
           {/* Quantity + Add — solo para roles que crean pedidos */}
-          {!readOnly && (
+          {!readOnly && !added && (
             <div className="flex items-center gap-3 pt-1">
               <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
                 <button
@@ -146,6 +157,54 @@ function ProductModal({
                 <ShoppingCart className="w-4 h-4" />
                 Agregar a mi pedido
               </button>
+            </div>
+          )}
+
+          {/* Confirmacion + venta cruzada — visible solo despues de agregar. */}
+          {added && (
+            <div className="pt-1 space-y-3">
+              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-3 py-2 text-sm">
+                <CheckCircle2 className="w-4 h-4" />
+                <span><strong>{qty}</strong> {qty > 1 ? 'unidades agregadas' : 'unidad agregada'} al pedido</span>
+              </div>
+
+              {related && related.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-700 mb-2">
+                    Tambien podrian interesarte
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {related.map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => onPickRelated && onPickRelated(r)}
+                        className="text-left bg-gray-50 hover:bg-blue-50 border border-gray-100 hover:border-blue-200 rounded-lg p-2 transition"
+                      >
+                        <ProductImage
+                          image={r.imageUrl}
+                          name={r.name}
+                          className="w-full h-14 object-contain mb-1"
+                        />
+                        <p className="text-[11px] font-medium text-gray-700 line-clamp-2 leading-snug">
+                          {r.name}
+                        </p>
+                        <p className="text-xs font-bold text-blue-700 mt-0.5">
+                          {formatCOP(r.price)}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={onClose}
+                  className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition"
+                >
+                  Seguir comprando
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -254,6 +313,46 @@ export default function ClientCatalog() {
     handleAdd(product, 1);
   }
 
+  // Click en tarjeta/fila: agrega directo al carrito (qty 1) sin abrir modal.
+  // El modal se reserva para casos que requieran configuracion (variantes,
+  // opciones obligatorias) — no se dispara automaticamente al hacer click.
+  function handleCardClick(product) {
+    if (isReadOnly) {
+      setModalProduct(product);
+      return;
+    }
+    handleAdd(product, 1);
+  }
+
+  function handleOpenDetail(e, product) {
+    e.stopPropagation();
+    setModalProduct(product);
+  }
+
+  // Productos relacionados para el modal: usa categorias relacionadas y, como
+  // fallback, productos aleatorios de la misma categoria.
+  const [relatedProducts, setRelatedProducts] = useState([]);
+  useEffect(() => {
+    if (!modalProduct) {
+      setRelatedProducts([]);
+      return;
+    }
+    let cancelled = false;
+    catalogApi
+      .related(modalProduct.id, 6)
+      .then((res) => {
+        if (cancelled) return;
+        const items = Array.isArray(res) ? res : (res?.data ?? []);
+        setRelatedProducts(items);
+      })
+      .catch(() => {
+        if (!cancelled) setRelatedProducts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modalProduct]);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const showingFrom = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const showingTo = Math.min(page * PAGE_SIZE, total);
@@ -296,9 +395,16 @@ export default function ClientCatalog() {
             {suggestedProducts.map((product) => (
               <div
                 key={product.id}
-                onClick={() => setModalProduct(product)}
-                className="bg-white rounded-lg border border-gray-100 p-3 cursor-pointer hover:shadow-md hover:border-blue-300 transition group"
+                onClick={() => handleCardClick(product)}
+                className="bg-white rounded-lg border border-gray-100 p-3 cursor-pointer hover:shadow-md hover:border-blue-300 transition group relative"
               >
+                <button
+                  onClick={(e) => handleOpenDetail(e, product)}
+                  title="Ver detalle"
+                  className="absolute top-1.5 right-1.5 p-1 bg-white/80 hover:bg-white text-gray-400 hover:text-blue-700 rounded-full transition"
+                >
+                  <Info className="w-3 h-3" />
+                </button>
                 <ProductImage
                   image={product.imageUrl}
                   name={product.name}
@@ -371,7 +477,7 @@ export default function ClientCatalog() {
             return (
               <div
                 key={product.id}
-                onClick={() => setModalProduct(product)}
+                onClick={() => handleCardClick(product)}
                 className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col hover:shadow-md hover:border-blue-200 transition-all overflow-hidden cursor-pointer group"
               >
                 {/* Product image */}
@@ -386,6 +492,13 @@ export default function ClientCatalog() {
                       Pocas unidades
                     </span>
                   )}
+                  <button
+                    onClick={(e) => handleOpenDetail(e, product)}
+                    title="Ver detalle"
+                    className="absolute top-2 left-2 p-1.5 bg-white/90 hover:bg-white text-gray-500 hover:text-blue-700 rounded-full shadow-sm transition"
+                  >
+                    <Info className="w-3.5 h-3.5" />
+                  </button>
                 </div>
 
                 {/* Content */}
@@ -450,7 +563,7 @@ export default function ClientCatalog() {
                   return (
                     <tr
                       key={product.id}
-                      onClick={() => setModalProduct(product)}
+                      onClick={() => handleCardClick(product)}
                       className="hover:bg-blue-50 transition-colors cursor-pointer"
                     >
                       <td className="px-4 py-3">
@@ -483,13 +596,22 @@ export default function ClientCatalog() {
                       </td>
                       {!isReadOnly && (
                         <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={(e) => handleQuickAdd(e, product)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            Agregar
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={(e) => handleOpenDetail(e, product)}
+                              title="Ver detalle"
+                              className="p-1.5 text-gray-400 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition"
+                            >
+                              <Info className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => handleQuickAdd(e, product)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-xs font-semibold transition"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              Agregar
+                            </button>
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -548,6 +670,8 @@ export default function ClientCatalog() {
           onClose={() => setModalProduct(null)}
           onAdd={(qty) => handleAdd(modalProduct, qty)}
           readOnly={isReadOnly}
+          related={relatedProducts}
+          onPickRelated={(p) => setModalProduct(p)}
         />
       )}
     </div>

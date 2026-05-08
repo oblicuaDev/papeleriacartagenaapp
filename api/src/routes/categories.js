@@ -63,6 +63,61 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
   }
 });
 
+// GET /categories/:id/related — categorias relacionadas (cross-selling)
+router.get('/:id/related', async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.id, c.name
+       FROM category_relations cr
+       JOIN categories c ON c.id = cr.related_category_id
+       WHERE cr.category_id = $1
+       ORDER BY c.name`,
+      [id]
+    );
+    return res.json(rows);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// PUT /categories/:id/related — reemplaza el set de categorias relacionadas
+// body: { relatedCategoryIds: number[] }
+router.put('/:id/related', requireRole('admin'), async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { relatedCategoryIds } = req.body;
+  if (!Array.isArray(relatedCategoryIds)) {
+    return res.status(422).json({ error: 'relatedCategoryIds debe ser un array' });
+  }
+  const ids = [...new Set(relatedCategoryIds.map(Number))].filter(
+    (n) => Number.isInteger(n) && n > 0 && n !== id
+  );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`DELETE FROM category_relations WHERE category_id = $1`, [id]);
+    for (const rid of ids) {
+      await client.query(
+        `INSERT INTO category_relations (category_id, related_category_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [id, rid]
+      );
+    }
+    await client.query('COMMIT');
+    return res.json({ categoryId: id, relatedCategoryIds: ids });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23503') {
+      return res.status(422).json({ error: 'Una de las categorias no existe' });
+    }
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    client.release();
+  }
+});
+
 // DELETE /categories/:id — hard delete con validacion
 router.delete('/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id);

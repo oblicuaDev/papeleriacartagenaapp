@@ -1,13 +1,14 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2 } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2, Building } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { STATUS_STYLES, formatCOP, statusLabel } from '../../data/mockData';
 
-// Estados en los que el asesor puede gestionar (no solo ver)
-const MANAGE_STATUSES = ['Pendiente', 'Validar disponibilidad', 'Alistamiento', 'En Ruta'];
+// Estados en los que el asesor puede gestionar (no solo ver).
+// 'Pendiente' se mantiene por compatibilidad con pedidos legacy.
+const MANAGE_STATUSES = ['Pendiente', 'Validar disponibilidad'];
 
 const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
@@ -25,12 +26,14 @@ const inputCls = 'border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outl
 
 const FILTER_TABS = [
   { label: 'Todos', value: 'all' },
-  { label: 'Pendiente', value: 'Pendiente' },
+  { label: 'Por validar', value: 'Validar disponibilidad' },
   { label: 'En proceso', value: 'process' },
   { label: 'Entregado', value: 'Entregado' },
 ];
 
-const IN_PROCESS_STATUSES = ['Validar disponibilidad', 'Alistamiento', 'En Ruta'];
+// 'Validar disponibilidad' ahora es responsabilidad del asesor (lo manejamos
+// con su propio tab). 'En proceso' representa logistica posterior.
+const IN_PROCESS_STATUSES = ['Alistamiento', 'En Ruta'];
 
 function HighlightCard({ label, value, sub, icon: Icon, bg, text }) {
   return (
@@ -48,14 +51,29 @@ function HighlightCard({ label, value, sub, icon: Icon, bg, text }) {
 }
 
 export default function AdvisorOrders() {
-  const { orders, users } = useApp();
+  const { orders, users, companies } = useApp();
   const { currentUser }   = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState('all');
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
+  const [companyFilter, setCompanyFilter] = useState('');
 
-  const isFiltered = dateFrom || dateTo;
+  // Inicializa el filtro empresa desde la URL (?empresa=N) cuando se navega
+  // desde la vista de empresas asignadas.
+  useEffect(() => {
+    const fromUrl = searchParams.get('empresa');
+    if (fromUrl) setCompanyFilter(fromUrl);
+  }, [searchParams]);
+
+  const userById = useMemo(() => {
+    const m = {};
+    for (const u of users) m[u.id] = u;
+    return m;
+  }, [users]);
+
+  const isFiltered = dateFrom || dateTo || companyFilter;
 
   function inRange(dateStr) {
     const d = new Date(dateStr);
@@ -64,7 +82,13 @@ export default function AdvisorOrders() {
     return true;
   }
 
-  const myOrders = orders.filter(o => o.advisorId === currentUser?.id && o.status !== 'Pendiente por aprobar' && inRange(o.createdAt));
+  function matchesCompany(o) {
+    if (!companyFilter) return true;
+    const u = userById[o.clientId];
+    return u && u.companyId === Number(companyFilter);
+  }
+
+  const myOrders = orders.filter(o => o.advisorId === currentUser?.id && o.status !== 'Pendiente por aprobar' && inRange(o.createdAt) && matchesCompany(o));
   const allMyOrders = orders.filter(o => o.advisorId === currentUser?.id && o.status !== 'Pendiente por aprobar'); // for tab counts
 
   const deliveredOrders = myOrders.filter(o => o.status === 'Entregado');
@@ -112,6 +136,27 @@ export default function AdvisorOrders() {
           <p className="text-sm text-gray-500 mt-1">{myOrders.length} pedidos en el periodo</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
+            <Building className="w-4 h-4 text-gray-400 flex-shrink-0" />
+            <select
+              value={companyFilter}
+              onChange={e => {
+                setCompanyFilter(e.target.value);
+                if (e.target.value) {
+                  setSearchParams({ empresa: e.target.value });
+                } else {
+                  setSearchParams({});
+                }
+              }}
+              className={inputCls}
+              title="Empresa"
+            >
+              <option value="">Todas las empresas</option>
+              {companies.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 shadow-sm">
             <CalendarDays className="w-4 h-4 text-gray-400 flex-shrink-0" />
             <span className="text-xs font-medium text-gray-500">Desde</span>
@@ -121,7 +166,7 @@ export default function AdvisorOrders() {
           </div>
           {isFiltered && (
             <button
-              onClick={() => { setDateFrom(''); setDateTo(''); }}
+              onClick={() => { setDateFrom(''); setDateTo(''); setCompanyFilter(''); setSearchParams({}); }}
               className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 border border-gray-200 rounded-xl transition"
             >
               <X className="w-4 h-4" />

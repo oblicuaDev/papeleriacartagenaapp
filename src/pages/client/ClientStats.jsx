@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, TrendingUp, Package, Users, Calendar, AlertCircle, Download, Filter } from 'lucide-react';
+import { BarChart3, TrendingUp, Package, Users, Calendar, AlertCircle, Download, Filter, Wallet } from 'lucide-react';
 import { statsApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -162,6 +162,49 @@ export default function ClientStats() {
         <StatCard icon={TrendingUp} label="Gasto total"      value={formatCOP(stats.totalSpent)}    accent="emerald" />
         <StatCard icon={TrendingUp} label="Gasto este mes"   value={formatCOP(stats.spentThisMonth)} accent="emerald" />
       </div>
+
+      {/* Presupuesto anual — solo admin_empresa con presupuesto configurado */}
+      {isCompanyScope && stats.annualBudget != null && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-9 h-9 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center">
+              <Wallet className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-gray-800">Presupuesto anual</h3>
+              <p className="text-xs text-gray-400">Calculado sobre pedidos entregados del anio actual</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
+            <div>
+              <p className="text-xs text-gray-500">Asignado</p>
+              <p className="text-xl font-bold text-gray-900">{formatCOP(stats.annualBudget)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Gastado</p>
+              <p className="text-xl font-bold text-rose-600">{formatCOP(stats.budgetSpent || 0)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Disponible</p>
+              <p className="text-xl font-bold text-emerald-600">{formatCOP(stats.budgetAvailable ?? 0)}</p>
+            </div>
+          </div>
+          {(() => {
+            const pct = stats.annualBudget > 0
+              ? Math.min(100, Math.round(((stats.budgetSpent || 0) / stats.annualBudget) * 100))
+              : 0;
+            const barColor = pct >= 90 ? 'bg-rose-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
+            return (
+              <div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className={`h-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">{pct}% utilizado</p>
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Status breakdown */}

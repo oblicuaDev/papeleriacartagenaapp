@@ -8,11 +8,16 @@ import { buildOrderDetailXlsx } from '../lib/orderExport.js';
 const router = Router();
 router.use(requireAuth);
 
-// Transiciones de estado permitidas por rol
+// Transiciones de estado permitidas por rol.
+// FLUJO ACTUALIZADO: supervisor aprueba -> 'Validar disponibilidad';
+// el asesor revisa items y avanza a 'Alistamiento'; el repartidor opera
+// desde 'Alistamiento' en adelante.
 const VALID_TRANSITIONS = {
   admin: {
-    'Pendiente por aprobar': ['Pendiente', 'Rechazado'],
+    'Pendiente por aprobar': ['Validar disponibilidad', 'Rechazado'],
     'Rechazado':             ['Pendiente'],
+    // 'Pendiente' es estado legacy: aprobaciones antiguas; el admin puede
+    // empujarlo a 'Validar disponibilidad' para reentrar al flujo nuevo.
     'Pendiente':             ['Validar disponibilidad'],
     'Validar disponibilidad':['Alistamiento'],
     'Alistamiento':          ['En Ruta'],
@@ -22,23 +27,20 @@ const VALID_TRANSITIONS = {
   advisor: {
     'Pendiente':             ['Validar disponibilidad'],
     'Validar disponibilidad':['Alistamiento'],
-    'Alistamiento':          ['En Ruta'],
-    'En Ruta':               ['Entregado'],
   },
   supervisor: {
-    'Pendiente por aprobar': ['Pendiente', 'Rechazado'],
+    'Pendiente por aprobar': ['Validar disponibilidad', 'Rechazado'],
   },
-  // Rol delivery: maneja todo el flujo operativo desde aprobado en adelante.
+  // Rol delivery: solo opera desde Alistamiento en adelante.
   delivery: {
-    'Pendiente':              ['Validar disponibilidad'],
-    'Validar disponibilidad': ['Alistamiento'],
     'Alistamiento':           ['En Ruta'],
     'En Ruta':                ['Entregado'],
   },
 };
 
-// Estados visibles para delivery (operativo: desde aprobado hasta entregado)
-const DELIVERY_VISIBLE_STATUSES = ['Pendiente', 'Validar disponibilidad', 'Alistamiento', 'En Ruta', 'Entregado'];
+// Estados visibles para delivery: ya no incluye 'Pendiente'/'Validar disponibilidad'
+// porque esos pertenecen al flujo asesor.
+const DELIVERY_VISIBLE_STATUSES = ['Alistamiento', 'En Ruta', 'Entregado'];
 
 // GET /orders
 router.get('/', async (req, res) => {
@@ -194,7 +196,7 @@ router.get('/:id/export.xlsx', async (req, res) => {
   const orderId = req.params.id.toUpperCase();
   try {
     const { rows: head } = await pool.query(
-      `SELECT id, client_id, advisor_id, status FROM orders WHERE id = $1`,
+      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
       [orderId]
     );
     if (!head[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -221,7 +223,7 @@ router.get('/:id/timeline', async (req, res) => {
 
   try {
     const { rows: orderRows } = await pool.query(
-      `SELECT id, client_id, advisor_id, status FROM orders WHERE id = $1`,
+      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
       [orderId]
     );
     if (!orderRows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -282,6 +284,29 @@ router.get('/:id/timeline', async (req, res) => {
         FROM order_attachments oa
         JOIN users u ON u.id = oa.uploaded_by
         WHERE oa.order_id = $1
+
+        UNION ALL
+
+        SELECT
+          'item_change'::text  AS event_type,
+          oic.created_at       AS occurred_at,
+          oic.changed_by       AS actor_id,
+          u.name               AS actor_name,
+          u.role               AS actor_role,
+          jsonb_build_object(
+            'productId',     oic.product_id,
+            'productName',   oic.product_name,
+            'sku',           oic.sku,
+            'action',        oic.action,
+            'prevQuantity',  oic.prev_quantity,
+            'newQuantity',   oic.new_quantity,
+            'prevUnitPrice', oic.prev_unit_price,
+            'newUnitPrice',  oic.new_unit_price,
+            'reason',        oic.reason
+          ) AS payload
+        FROM order_item_changes oic
+        LEFT JOIN users u ON u.id = oic.changed_by
+        WHERE oic.order_id = $1
       ) t
       ORDER BY occurred_at ASC, event_type ASC
       `,
@@ -636,6 +661,16 @@ router.put('/:id', async (req, res) => {
       }
     }
 
+    // Pedido Entregado: bloquear cualquier cambio operativo (carrier, advisorId).
+    if (order.status === 'Entregado') {
+      if (carrier !== undefined || advisorId !== undefined) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'No se pueden modificar datos logisticos de un pedido entregado',
+        });
+      }
+    }
+
     // Construir UPDATE dinamico
     const fields = [];
     const params = [];
@@ -653,6 +688,13 @@ router.put('/:id', async (req, res) => {
     // El backend valida que sea un usuario active con role=delivery (o null para desasignar).
     let deliveryAssignmentLog = null; // { name } | { unassigned: true }
     if (deliveryId !== undefined && (role === 'admin' || role === 'advisor')) {
+      // Pedido Entregado: no se puede asignar/reasignar repartidor.
+      if (order.status === 'Entregado') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'No se puede modificar el repartidor de un pedido ya entregado',
+        });
+      }
       const previousDeliveryId = order.delivery_id;
       if (deliveryId === null) {
         fields.push(`delivery_id = NULL`);
@@ -712,10 +754,16 @@ router.put('/:id', async (req, res) => {
     await client.query('COMMIT');
 
     // PHASE 7: generar orden de compra (PDF) cuando se aprueba el pedido.
-    // Se ejecuta DESPUES del commit para no bloquear la transaccion ni perder
-    // el cambio de estado si la generacion del PDF falla.
+    // Aprobacion = transicion desde 'Pendiente por aprobar' al estado de
+    // entrada al flujo operativo ('Validar disponibilidad' en flujo nuevo,
+    // 'Pendiente' en legacy). Se ejecuta DESPUES del commit para no bloquear
+    // la transaccion ni perder el cambio de estado si la generacion falla.
     let warnings;
-    if (statusChanges && status === 'Pendiente' && order.status === 'Pendiente por aprobar') {
+    const isApproval =
+      statusChanges &&
+      order.status === 'Pendiente por aprobar' &&
+      (status === 'Validar disponibilidad' || status === 'Pendiente');
+    if (isApproval) {
       try {
         await ensurePurchaseOrderPdf(orderId, myId);
       } catch (pdfErr) {
@@ -727,6 +775,211 @@ router.put('/:id', async (req, res) => {
     return res.json(warnings ? { ...updated[0], warnings } : updated[0]);
   } catch (err) {
     await client.query('ROLLBACK');
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /orders/:id/items
+// Modificacion de items por el asesor durante 'Validar disponibilidad'.
+// Permite cambiar cantidades o eliminar items (no agregar productos nuevos).
+// Cada modificacion exige un comentario y queda en order_item_changes +
+// order_comments. Recalcula total y regenera el PDF de orden de compra.
+router.put('/:id/items', async (req, res) => {
+  const { role, id: myId } = req.user;
+  const orderId = req.params.id.toUpperCase();
+  const { items, reason } = req.body;
+
+  if (role !== 'admin' && role !== 'advisor') {
+    return res.status(403).json({ error: 'Solo admin o asesor pueden modificar items' });
+  }
+  if (!Array.isArray(items)) {
+    return res.status(422).json({ error: 'items debe ser un array' });
+  }
+  const cleanReason = (reason || '').trim();
+  if (!cleanReason) {
+    return res.status(422).json({ error: 'Debes indicar el motivo de la modificacion' });
+  }
+  if (cleanReason.length > 1000) {
+    return res.status(422).json({ error: 'reason no puede superar 1000 caracteres' });
+  }
+
+  // Validar payload de items
+  const desiredByProduct = new Map(); // productId -> quantity
+  for (const [idx, it] of items.entries()) {
+    const pid = Number(it?.productId);
+    const qty = Math.trunc(Number(it?.quantity));
+    if (!Number.isInteger(pid) || pid <= 0) {
+      return res.status(422).json({ error: `items[${idx}].productId invalido` });
+    }
+    if (!Number.isInteger(qty) || qty <= 0) {
+      return res.status(422).json({ error: `items[${idx}].quantity debe ser entero positivo` });
+    }
+    if (desiredByProduct.has(pid)) {
+      return res.status(422).json({ error: `productId duplicado: ${pid}` });
+    }
+    desiredByProduct.set(pid, qty);
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Lock de pedido y validaciones de scope
+    const { rows: orderRows } = await client.query(
+      `SELECT o.* FROM orders o WHERE o.id = $1 FOR UPDATE`, [orderId]
+    );
+    const order = orderRows[0];
+    if (!order) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Pedido no encontrado' });
+    }
+    if (order.status !== 'Validar disponibilidad') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'Solo se pueden modificar items mientras el pedido esta en Validar disponibilidad',
+      });
+    }
+    if (role === 'advisor' && order.advisor_id && order.advisor_id !== myId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Pedido asignado a otro asesor' });
+    }
+
+    // Snapshot actual (frozen prices: NO se cambia el unit_price aqui)
+    const { rows: existing } = await client.query(
+      `SELECT * FROM order_items WHERE order_id = $1`, [orderId]
+    );
+
+    const existingByProduct = new Map();
+    for (const it of existing) existingByProduct.set(it.product_id, it);
+
+    // Validar que solo se modifiquen/eliminen items existentes (no se agregan nuevos)
+    for (const pid of desiredByProduct.keys()) {
+      if (!existingByProduct.has(pid)) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({ error: `productId ${pid} no pertenece al pedido` });
+      }
+    }
+
+    // Calcular cambios (updates y removes)
+    const changes = [];
+    let newTotal = 0;
+
+    for (const it of existing) {
+      const desiredQty = desiredByProduct.get(it.product_id);
+      const unitPrice = Number(it.unit_price);
+      if (desiredQty === undefined) {
+        // Eliminado
+        changes.push({
+          action: 'removed',
+          productId: it.product_id,
+          productName: it.product_name,
+          sku: it.sku,
+          prevQuantity: it.quantity,
+          newQuantity: null,
+          prevUnitPrice: unitPrice,
+          newUnitPrice: null,
+        });
+      } else if (desiredQty !== it.quantity) {
+        // Cambio de cantidad
+        changes.push({
+          action: 'updated',
+          productId: it.product_id,
+          productName: it.product_name,
+          sku: it.sku,
+          prevQuantity: it.quantity,
+          newQuantity: desiredQty,
+          prevUnitPrice: unitPrice,
+          newUnitPrice: unitPrice,
+        });
+        newTotal += unitPrice * desiredQty;
+      } else {
+        newTotal += unitPrice * it.quantity;
+      }
+    }
+
+    if (!changes.length) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({ error: 'No hay cambios para guardar' });
+    }
+
+    // Validar que quede al menos un item en el pedido
+    const remainingItems = existing.filter(it => desiredByProduct.has(it.product_id)).length;
+    if (remainingItems === 0) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({
+        error: 'No puedes eliminar todos los productos. Si el pedido no es viable, rechazalo o cancelalo segun el flujo.',
+      });
+    }
+
+    // Aplicar cambios en order_items
+    for (const ch of changes) {
+      if (ch.action === 'removed') {
+        await client.query(
+          `DELETE FROM order_items WHERE order_id = $1 AND product_id = $2`,
+          [orderId, ch.productId]
+        );
+      } else {
+        await client.query(
+          `UPDATE order_items SET quantity = $1
+           WHERE order_id = $2 AND product_id = $3`,
+          [ch.newQuantity, orderId, ch.productId]
+        );
+      }
+
+      await client.query(
+        `INSERT INTO order_item_changes
+           (order_id, product_id, product_name, sku, action,
+            prev_quantity, new_quantity, prev_unit_price, new_unit_price,
+            reason, changed_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          orderId, ch.productId, ch.productName, ch.sku || null, ch.action,
+          ch.prevQuantity, ch.newQuantity, ch.prevUnitPrice, ch.newUnitPrice,
+          cleanReason, myId,
+        ]
+      );
+    }
+
+    // Recalcular total
+    await client.query(
+      `UPDATE orders SET total = $1 WHERE id = $2`,
+      [newTotal, orderId]
+    );
+
+    // Comentario sistema con el motivo (queda en timeline)
+    const summary = changes.map(c =>
+      c.action === 'removed'
+        ? `eliminado: ${c.productName}`
+        : `${c.productName}: ${c.prevQuantity} -> ${c.newQuantity}`
+    ).join('; ');
+    await client.query(
+      `INSERT INTO order_comments (order_id, author_id, text)
+       VALUES ($1, $2, $3)`,
+      [orderId, myId, `[Validacion] ${summary}. Motivo: ${cleanReason}`]
+    );
+
+    await client.query('COMMIT');
+
+    // Regenerar PO PDF (fuera de la transaccion para no bloquear)
+    let warnings;
+    try {
+      await ensurePurchaseOrderPdf(orderId, myId, pool, { regenerate: true });
+    } catch (pdfErr) {
+      console.error(`[orders] No se pudo regenerar PDF tras edicion de items en ${orderId}:`, pdfErr);
+      warnings = ['No se pudo regenerar la orden de compra'];
+    }
+
+    return res.json({
+      orderId,
+      total: newTotal,
+      changes,
+      ...(warnings ? { warnings } : {}),
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
   } finally {

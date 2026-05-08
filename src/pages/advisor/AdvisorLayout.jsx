@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { LogOut, ClipboardList } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useApp } from "../../context/AppContext";
+import CreditsFooter from "../../components/CreditsFooter";
 
 export default function AdvisorLayout() {
   const { currentUser, logout } = useAuth();
@@ -83,6 +84,8 @@ export default function AdvisorLayout() {
       <main className="max-w-7xl mx-auto px-4 py-6">
         <Outlet />
       </main>
+
+      <CreditsFooter />
     </div>
   );
 }

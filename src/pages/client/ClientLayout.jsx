@@ -5,6 +5,7 @@ import { ShoppingCart, LogOut, X, Minus, Plus, Trash2, Search, ClipboardCheck, U
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { formatCOP } from '../../data/mockData';
+import CreditsFooter from '../../components/CreditsFooter';
 
 export default function ClientLayout() {
   const { currentUser, logout } = useAuth();
@@ -160,6 +161,8 @@ export default function ClientLayout() {
       <main className="max-w-7xl mx-auto px-4 py-6">
         <Outlet context={{ search }} />
       </main>
+
+      <CreditsFooter />
 
       {/* Cart Slide-Over */}
       {cartOpen && (

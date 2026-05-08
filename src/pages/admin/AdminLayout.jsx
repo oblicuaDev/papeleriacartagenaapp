@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import CreditsFooter from '../../components/CreditsFooter';
 
 const NAV_ITEMS = [
   { to: '/admin',                   label: 'Home',                      icon: Home,          end: true },
@@ -130,6 +131,7 @@ export default function AdminLayout() {
         <main className="flex-1 overflow-y-auto p-6">
           <Outlet />
         </main>
+        <CreditsFooter />
       </div>
     </div>
   );

@@ -3,3 +3,10 @@ dist
 .DS_Store
 *.local
 .claude
+graphify-out
+postman
+api/node_modules
+.claude
+api/uploads
+.venv
+infra

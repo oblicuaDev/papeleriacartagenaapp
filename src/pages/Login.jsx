@@ -1,7 +1,7 @@
 import logo from "../logo-cartagena.jpg";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Mail, Lock, LogIn, Eye, EyeOff } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
+import { Mail, Lock, LogIn, Eye, EyeOff, BookOpen } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import CreditsFooter from "../components/CreditsFooter";
 
@@ -123,6 +123,17 @@ export default function Login() {
               {loading ? "Ingresando..." : "Ingresar"}
             </button>
           </form>
+        </div>
+
+        {/* Help link */}
+        <div className="mt-5 text-center">
+          <Link
+            to="/manual"
+            className="inline-flex items-center gap-2 text-blue-200 hover:text-white text-sm transition py-2 px-4 rounded-lg hover:bg-white hover:bg-opacity-10"
+          >
+            <BookOpen className="w-4 h-4" />
+            ¿Cómo realizar un pedido? — Ver guía
+          </Link>
         </div>
       </div>
       </div>

@@ -3,6 +3,7 @@ import { AuthProvider } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
+import UserManual from './pages/UserManual';
 import AdminLayout from './pages/admin/AdminLayout';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminProducts from './pages/admin/AdminProducts';
@@ -36,6 +37,7 @@ export default function App() {
       <AppProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/manual" element={<UserManual />} />
           <Route
             path="/admin"
             element={

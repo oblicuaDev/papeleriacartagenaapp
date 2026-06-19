@@ -9,4 +9,5 @@ api/node_modules
 .claude
 api/uploads
 .venv
-infra
+infra/*
+!infra/migrations/

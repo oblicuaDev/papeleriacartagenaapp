@@ -102,6 +102,7 @@ const EMPTY_FORM = {
   stock: "",
   unit: "Unidad",
   active: true,
+  notInCatalog: false,
   imageUrl: null, // URL persistida en backend
   imageFile: null, // File pendiente de subir
   imagePreview: null, // base64 para preview local
@@ -174,6 +175,7 @@ export default function AdminProducts() {
       stock: String(product.stock),
       unit: product.unit,
       active: product.active,
+      notInCatalog: product.notInCatalog || false,
       imageUrl: product.imageUrl || null,
       imageFile: null,
       imagePreview: null,
@@ -222,6 +224,7 @@ export default function AdminProducts() {
       stock: Number(form.stock),
       unit: form.unit,
       active: form.active,
+      notInCatalog: form.notInCatalog,
       complementaryIds: form.complementaryIds,
     };
     try {
@@ -816,6 +819,20 @@ export default function AdminProducts() {
               />
               <label htmlFor="active" className="text-sm text-gray-700">
                 Producto activo
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="notInCatalog"
+                checked={form.notInCatalog}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, notInCatalog: e.target.checked }))
+                }
+                className="rounded"
+              />
+              <label htmlFor="notInCatalog" className="text-sm text-gray-700">
+                Este producto no hace parte del catálogo
               </label>
             </div>
             {saveError && (

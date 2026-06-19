@@ -15,7 +15,9 @@
     "db:seed": "npm --prefix api run seed"
   },
   "dependencies": {
+    "bcrypt": "^6.0.0",
     "lucide-react": "^0.344.0",
+    "pg": "^8.21.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-is": "^19.2.5",

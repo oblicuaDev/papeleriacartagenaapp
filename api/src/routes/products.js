@@ -156,7 +156,7 @@ router.get('/:id', async (req, res) => {
 
 // POST /products
 router.post('/', requireRole('admin'), async (req, res) => {
-  const { name, sku, categoryId, description, basePrice, stock = 0, unit, active = true, complementaryIds = [], imageUrl } = req.body;
+  const { name, sku, categoryId, description, basePrice, stock = 0, unit, active = true, notInCatalog = false, complementaryIds = [], imageUrl } = req.body;
   if (!name || !sku || !categoryId || typeof basePrice !== 'number' || basePrice < 0 || !unit) {
     return res.status(422).json({ error: 'name, sku, categoryId, basePrice (válido y >= 0) y unit son requeridos' });
   }
@@ -168,9 +168,9 @@ router.post('/', requireRole('admin'), async (req, res) => {
     if (!catRows[0]) return res.status(404).json({ error: 'Categoría no encontrada' });
 
     const { rows } = await client.query(
-      `INSERT INTO products (name, sku, category_id, description, base_price, stock, unit, image_url, active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [name, sku, categoryId, description || null, basePrice, stock, unit, imageUrl || null, active]
+      `INSERT INTO products (name, sku, category_id, description, base_price, stock, unit, image_url, active, not_in_catalog)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [name, sku, categoryId, description || null, basePrice, stock, unit, imageUrl || null, active, notInCatalog]
     );
     const product = rows[0];
 
@@ -200,7 +200,7 @@ router.post('/', requireRole('admin'), async (req, res) => {
 // PUT /products/:id
 router.put('/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id);
-  const { name, categoryId, description, basePrice, stock, unit, active, complementaryIds, imageUrl } = req.body;
+  const { name, categoryId, description, basePrice, stock, unit, active, notInCatalog, complementaryIds, imageUrl } = req.body;
 
   const client = await pool.connect();
   try {
@@ -214,8 +214,9 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     if (basePrice !== undefined) fields.push(`base_price  = $${params.push(basePrice)}`);
     if (stock !== undefined) fields.push(`stock       = $${params.push(stock)}`);
     if (unit !== undefined) fields.push(`unit        = $${params.push(unit)}`);
-    if (active !== undefined) fields.push(`active      = $${params.push(active)}`);
-    if (imageUrl !== undefined) fields.push(`image_url   = $${params.push(imageUrl)}`);
+    if (active !== undefined) fields.push(`active          = $${params.push(active)}`);
+    if (notInCatalog !== undefined) fields.push(`not_in_catalog  = $${params.push(notInCatalog)}`);
+    if (imageUrl !== undefined) fields.push(`image_url       = $${params.push(imageUrl)}`);
 
     if (fields.length) {
       params.push(id);

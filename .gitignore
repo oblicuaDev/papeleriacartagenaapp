@@ -11,3 +11,10 @@ api/uploads
 .venv
 infra/*
 !infra/migrations/
+
+# Imágenes y archivos temporales de carga
+imagen/
+*.rar
+dry-run.txt
+upload-result.txt
+scripts/upload-product-images.mjs

@@ -136,6 +136,9 @@ export default function AdminProducts() {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterActive, setFilterActive] = useState(""); // "", "true", "false"
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const PAGE_SIZE = 50;
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
@@ -340,24 +343,27 @@ export default function AdminProducts() {
   // Carga productos desde la API con los filtros actuales (incluye activos e inactivos)
   const loadProducts = useCallback(async () => {
     try {
-      const params = { limit: 100 };
-      if (search && search.trim() !== "") params.search = search;
-      if (filterCategory && filterCategory !== "")
-        params.categoryId = filterCategory;
-      console.log({ filterActive });
-
+      const params = { limit: PAGE_SIZE, page };
+      if (search.trim()) params.search = search;
+      if (filterCategory) params.categoryId = filterCategory;
       if (filterActive !== "") params.active = filterActive;
 
       const response = await productsApi.list(params);
       setProducts(response.data || response);
+      setTotal(response.total ?? 0);
     } catch (err) {
       console.error("Error al buscar en la API:", err);
     }
-  }, [search, filterCategory, filterActive, setProducts]);
+  }, [search, filterCategory, filterActive, page, setProducts, PAGE_SIZE]);
 
-  // Debounce los cambios de filtros para no saturar la API
+  // Al cambiar filtros vuelve a página 1
   useEffect(() => {
-    const t = setTimeout(loadProducts, 500);
+    setPage(1);
+  }, [search, filterCategory, filterActive]);
+
+  // Debounce la carga para no saturar la API
+  useEffect(() => {
+    const t = setTimeout(loadProducts, 300);
     return () => clearTimeout(t);
   }, [loadProducts]);
 
@@ -373,7 +379,7 @@ export default function AdminProducts() {
             Catálogo de Productos
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            {products.length} productos en total
+            {total} productos en total
           </p>
         </div>
         <div className="flex gap-2">
@@ -559,6 +565,66 @@ export default function AdminProducts() {
             </tbody>
           </table>
         </div>
+
+        {/* Paginación */}
+        {total > PAGE_SIZE && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+            <p className="text-sm text-gray-500">
+              Mostrando{" "}
+              <span className="font-medium text-gray-700">
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)}
+              </span>{" "}
+              de <span className="font-medium text-gray-700">{total}</span>
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                ← Anterior
+              </button>
+
+              {Array.from({ length: Math.ceil(total / PAGE_SIZE) }, (_, i) => i + 1)
+                .filter((p) => {
+                  const last = Math.ceil(total / PAGE_SIZE);
+                  return p === 1 || p === last || Math.abs(p - page) <= 2;
+                })
+                .reduce((acc, p, idx, arr) => {
+                  if (idx > 0 && p - arr[idx - 1] > 1) acc.push("...");
+                  acc.push(p);
+                  return acc;
+                }, [])
+                .map((p, idx) =>
+                  p === "..." ? (
+                    <span key={`ellipsis-${idx}`} className="px-2 text-gray-400 text-sm">
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={p}
+                      onClick={() => setPage(p)}
+                      className={`w-9 h-9 text-sm rounded-lg border transition ${
+                        p === page
+                          ? "bg-blue-700 text-white border-blue-700 font-semibold"
+                          : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+
+              <button
+                onClick={() => setPage((p) => Math.min(Math.ceil(total / PAGE_SIZE), p + 1))}
+                disabled={page === Math.ceil(total / PAGE_SIZE)}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                Siguiente →
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Product Modal */}

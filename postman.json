@@ -22,6 +22,20 @@
         {
             "key": "token",
             "value": ""
+        },
+        {
+            "key": "admin_email",
+            "value": "admin@papeleriacartagena.com"
+        },
+        {
+            "key": "admin_password",
+            "value": "",
+            "type": "secret"
+        },
+        {
+            "key": "new_user_password",
+            "value": "",
+            "type": "secret"
         }
     ],
     "item": [
@@ -43,7 +57,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"email\": \"admin@papeleriacartagena.com\",\n  \"password\": \"***REMOVED***\"\n}"
+                            "raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{admin_password}}\"\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/auth/login",
@@ -1713,7 +1727,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"name\": \"Carlos Pérez\",\n  \"email\": \"carlos@papeleriacartagena.com\",\n  \"password\": \"***REMOVED***\",\n  \"role\": \"advisor\",\n  \"branchId\": 1,\n  \"initials\": \"CP\"\n}"
+                            "raw": "{\n  \"name\": \"Carlos Pérez\",\n  \"email\": \"carlos@papeleriacartagena.com\",\n  \"password\": \"{{new_user_password}}\",\n  \"role\": \"advisor\",\n  \"branchId\": 1,\n  \"initials\": \"CP\"\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/users",
@@ -1752,7 +1766,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"name\": \"Repartidor Demo\",\n  \"email\": \"delivery@papeleriacartagena.com\",\n  \"password\": \"***REMOVED***\",\n  \"role\": \"delivery\",\n  \"branchId\": 1,\n  \"initials\": \"RD\"\n}"
+                            "raw": "{\n  \"name\": \"Repartidor Demo\",\n  \"email\": \"delivery@papeleriacartagena.com\",\n  \"password\": \"{{new_user_password}}\",\n  \"role\": \"delivery\",\n  \"branchId\": 1,\n  \"initials\": \"RD\"\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/users",
@@ -1791,7 +1805,7 @@
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"name\": \"Pedidos Norte\",\n  \"email\": \"pedidos@norte.co\",\n  \"password\": \"***REMOVED***\",\n  \"role\": \"client\",\n  \"clientRole\": \"creador_pedidos\",\n  \"companyId\": 1,\n  \"sucursalId\": 1,\n  \"priceListId\": 2,\n  \"initials\": \"PN\"\n}"
+                            "raw": "{\n  \"name\": \"Pedidos Norte\",\n  \"email\": \"pedidos@norte.co\",\n  \"password\": \"{{new_user_password}}\",\n  \"role\": \"client\",\n  \"clientRole\": \"creador_pedidos\",\n  \"companyId\": 1,\n  \"sucursalId\": 1,\n  \"priceListId\": 2,\n  \"initials\": \"PN\"\n}"
                         },
                         "url": {
                             "raw": "{{base_url}}/users",

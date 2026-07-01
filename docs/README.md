@@ -166,15 +166,19 @@ npm run preview       # Preview del build
 
 ## Credenciales de prueba
 
-| Rol              | Email                               | Contraseña      |
-|------------------|-------------------------------------|-----------------|
-| Admin            | admin@papeleriacartagena.com        | ***REMOVED***      |
-| Asesor Cartagena | asesor@papeleriacartagena.com       | ***REMOVED***     |
-| Asesor Bogotá    | carlos@papeleriacartagena.com       | ***REMOVED***     |
-| Repartidor       | pedro@papeleriacartagena.com        | ***REMOVED*** |
-| Supervisor       | supervisor@elcentro.com             | ***REMOVED***      |
-| Comprador        | pedidos@elcentro.com                | ***REMOVED***    |
-| Admin empresa    | admin@elcentro.com                  | ***REMOVED***   |
+Las contraseñas ya no se documentan en texto plano aquí (el repositorio es público).
+Se definen en tu `api/.env.local` como variables `SEED_*` (ver `api/.env.example`)
+y `npm run db:seed` las imprime en consola al terminar.
+
+| Rol              | Email                               |
+|------------------|--------------------------------------|
+| Admin            | admin@papeleriacartagena.com        |
+| Asesor Cartagena | asesor@papeleriacartagena.com       |
+| Asesor Bogotá    | carlos@papeleriacartagena.com       |
+| Repartidor       | pedro@papeleriacartagena.com        |
+| Supervisor       | supervisor@elcentro.com             |
+| Comprador        | pedidos@elcentro.com                |
+| Admin empresa    | admin@elcentro.com                  |
 
 ---
 

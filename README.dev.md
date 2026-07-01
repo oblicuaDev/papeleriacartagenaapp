@@ -66,30 +66,32 @@ Abre el navegador en: **http://localhost:5173**
 
 ## Credenciales de prueba
 
-| Rol | Email | Contraseña |
-| --- | ----- | ---------- |
+Las contraseñas de las cuentas de prueba ya no se documentan en texto plano aquí
+(evita que queden expuestas en el repositorio, que es público). Se definen como
+variables `SEED_*` en tu `api/.env.local` (ver `api/.env.example`) y `npm run db:seed`
+las imprime en consola al terminar.
 
 ─── Internos ──────────────────────────────────────
-admin@papeleriacartagena.com ***REMOVED***
-asesor@papeleriacartagena.com ***REMOVED*** (Cartagena)
-carlos@papeleriacartagena.com ***REMOVED*** (Bogotá)
-pedro@papeleriacartagena.com ***REMOVED*** (Cartagena)
-lucia@papeleriacartagena.com ***REMOVED*** (Bogotá)
+admin@papeleriacartagena.com
+asesor@papeleriacartagena.com (Cartagena)
+carlos@papeleriacartagena.com (Bogotá)
+pedro@papeleriacartagena.com (Cartagena, repartidor)
+lucia@papeleriacartagena.com (Bogotá, repartidor)
 
 ─── Papelería El Centro · Lista B (override Medellín → A) ───
-supervisor@elcentro.com ***REMOVED***
-pedidos@elcentro.com ***REMOVED***
-admin@elcentro.com ***REMOVED*** ← admin_empresa
-supervisor.medellin@elcentro.com ***REMOVED***
-pedidos.medellin@elcentro.com ***REMOVED***
+supervisor@elcentro.com
+pedidos@elcentro.com
+admin@elcentro.com ← admin_empresa
+supervisor.medellin@elcentro.com
+pedidos.medellin@elcentro.com
 
 ─── Distribuciones Norte · Lista C ────────────────
-supervisor@distnorte.com ***REMOVED***
-pedidos@distnorte.com ***REMOVED***
+supervisor@distnorte.com
+pedidos@distnorte.com
 
 ─── Colegio San Andrés · Lista A ──────────────────
-rectoria@colegiosanandres.edu.co ***REMOVED***
-compras@colegiosanandres.edu.co ***REMOVED***
+rectoria@colegiosanandres.edu.co
+compras@colegiosanandres.edu.co
 
 ---
 

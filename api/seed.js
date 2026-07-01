@@ -15,8 +15,27 @@ const pool = new pg.Pool({
   port:     parseInt(process.env.DB_PORT || '5432'),
   database: process.env.DB_NAME     || 'papeleria_db',
   user:     process.env.DB_USER     || 'papeleria_user',
-  password: process.env.DB_PASS     || '***REMOVED***',
+  password: process.env.DB_PASS,
 });
+
+// Contraseñas de las cuentas de prueba: se definen por env var (ver api/.env.local)
+// para no commitear credenciales reales al repositorio.
+const SEED_PASSWORDS = {
+  admin:        requireEnv('SEED_ADMIN_PASSWORD'),
+  asesor:       requireEnv('SEED_ASESOR_PASSWORD'),
+  repartidor:   requireEnv('SEED_REPARTIDOR_PASSWORD'),
+  supervisor:   requireEnv('SEED_SUPERVISOR_PASSWORD'),
+  creador:      requireEnv('SEED_CREADOR_PASSWORD'),
+  adminEmpresa: requireEnv('SEED_ADMIN_EMPRESA_PASSWORD'),
+};
+
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Falta ${name} en el entorno (ver api/.env.example). No se hardcodean contraseñas en el seed.`);
+  }
+  return value;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────
 const hash = (pwd) => bcrypt.hash(pwd, 12);
@@ -212,27 +231,27 @@ async function seed() {
     // ───────── Personal interno (admin / advisors / delivery)
     head('Personal interno');
     await ensureUser(client, {
-      email: 'admin@papeleriacartagena.com', password: '***REMOVED***',
+      email: 'admin@papeleriacartagena.com', password: SEED_PASSWORDS.admin,
       name: 'Administrador General', role: 'admin', initials: 'AG',
     });
-    log('Admin: admin@papeleriacartagena.com / ***REMOVED***');
+    log('Admin: admin@papeleriacartagena.com (ver SEED_ADMIN_PASSWORD)');
 
     const advisorAna = await ensureUser(client, {
-      email: 'asesor@papeleriacartagena.com', password: '***REMOVED***',
+      email: 'asesor@papeleriacartagena.com', password: SEED_PASSWORDS.asesor,
       name: 'Ana Martínez', role: 'advisor', branch_id: branchCartagena, initials: 'AM',
     });
     const advisorCarlos = await ensureUser(client, {
-      email: 'carlos@papeleriacartagena.com', password: '***REMOVED***',
+      email: 'carlos@papeleriacartagena.com', password: SEED_PASSWORDS.asesor,
       name: 'Carlos Rodríguez', role: 'advisor', branch_id: branchBogota, initials: 'CR',
     });
     log(`Asesores: Ana (#${advisorAna.id}), Carlos (#${advisorCarlos.id})`);
 
     const deliveryPedro = await ensureUser(client, {
-      email: 'pedro@papeleriacartagena.com', password: '***REMOVED***',
+      email: 'pedro@papeleriacartagena.com', password: SEED_PASSWORDS.repartidor,
       name: 'Pedro García', role: 'delivery', branch_id: branchCartagena, initials: 'PG',
     });
     const deliveryLucia = await ensureUser(client, {
-      email: 'lucia@papeleriacartagena.com', password: '***REMOVED***',
+      email: 'lucia@papeleriacartagena.com', password: SEED_PASSWORDS.repartidor,
       name: 'Lucía Pérez', role: 'delivery', branch_id: branchBogota, initials: 'LP',
     });
     log(`Repartidores: Pedro (#${deliveryPedro.id}), Lucía (#${deliveryLucia.id})`);
@@ -291,52 +310,52 @@ async function seed() {
 
     // El Centro (Bogotá)
     const supCentroBogota = await ensureUser(client, {
-      email: 'supervisor@elcentro.com', password: '***REMOVED***',
+      email: 'supervisor@elcentro.com', password: SEED_PASSWORDS.supervisor,
       name: 'Sofía Castro', role: 'client', client_role: 'supervisor',
       company_id: elCentroId, sucursal_id: elCentroSucBogota, initials: 'SC',
     });
     const creadorCentroBogota = await ensureUser(client, {
-      email: 'pedidos@elcentro.com', password: '***REMOVED***',
+      email: 'pedidos@elcentro.com', password: SEED_PASSWORDS.creador,
       name: 'Carlos Pinto', role: 'client', client_role: 'creador_pedidos',
       company_id: elCentroId, sucursal_id: elCentroSucBogota, initials: 'CP',
     });
     const adminEmpCentro = await ensureUser(client, {
-      email: 'admin@elcentro.com', password: '***REMOVED***',
+      email: 'admin@elcentro.com', password: SEED_PASSWORDS.adminEmpresa,
       name: 'Mónica Ortiz', role: 'client', client_role: 'admin_empresa',
       company_id: elCentroId, sucursal_id: elCentroSucBogota, initials: 'MO',
     });
     // El Centro (Medellín) — supervisor de otra sucursal para validar scope
     const supCentroMedellin = await ensureUser(client, {
-      email: 'supervisor.medellin@elcentro.com', password: '***REMOVED***',
+      email: 'supervisor.medellin@elcentro.com', password: SEED_PASSWORDS.supervisor,
       name: 'Andrés Mejía', role: 'client', client_role: 'supervisor',
       company_id: elCentroId, sucursal_id: elCentroSucMedellin, initials: 'AM',
     });
     const creadorCentroMedellin = await ensureUser(client, {
-      email: 'pedidos.medellin@elcentro.com', password: '***REMOVED***',
+      email: 'pedidos.medellin@elcentro.com', password: SEED_PASSWORDS.creador,
       name: 'Diana Velez', role: 'client', client_role: 'creador_pedidos',
       company_id: elCentroId, sucursal_id: elCentroSucMedellin, initials: 'DV',
     });
 
     // Distribuciones Norte
     const supDistNorte = await ensureUser(client, {
-      email: 'supervisor@distnorte.com', password: '***REMOVED***',
+      email: 'supervisor@distnorte.com', password: SEED_PASSWORDS.supervisor,
       name: 'Roberto Salas', role: 'client', client_role: 'supervisor',
       company_id: distNorteId, sucursal_id: distNorteSuc, initials: 'RS',
     });
     const creadorDistNorte = await ensureUser(client, {
-      email: 'pedidos@distnorte.com', password: '***REMOVED***',
+      email: 'pedidos@distnorte.com', password: SEED_PASSWORDS.creador,
       name: 'Laura Hoyos', role: 'client', client_role: 'creador_pedidos',
       company_id: distNorteId, sucursal_id: distNorteSuc, initials: 'LH',
     });
 
     // Colegio
     const supColegioPrim = await ensureUser(client, {
-      email: 'rectoria@colegiosanandres.edu.co', password: '***REMOVED***',
+      email: 'rectoria@colegiosanandres.edu.co', password: SEED_PASSWORDS.supervisor,
       name: 'María Pérez', role: 'client', client_role: 'supervisor',
       company_id: colegioId, sucursal_id: colegioSucPrimaria, initials: 'MP',
     });
     const creadorColegio = await ensureUser(client, {
-      email: 'compras@colegiosanandres.edu.co', password: '***REMOVED***',
+      email: 'compras@colegiosanandres.edu.co', password: SEED_PASSWORDS.creador,
       name: 'Juan Torres', role: 'client', client_role: 'creador_pedidos',
       company_id: colegioId, sucursal_id: colegioSucBachillerato, initials: 'JT',
     });
@@ -362,25 +381,25 @@ async function seed() {
 
     // ───────── Resumen
     console.log('\n[seed] ✅ Listo\n');
-    console.log('Credenciales de prueba:');
+    console.log('Credenciales de prueba (contraseñas tomadas de tu api/.env.local):');
     console.log('  ─── Internos ──────────────────────────────────────');
-    console.log('  Admin                  admin@papeleriacartagena.com    ***REMOVED***');
-    console.log('  Asesor (Cartagena)     asesor@papeleriacartagena.com   ***REMOVED***');
-    console.log('  Asesor (Bogotá)        carlos@papeleriacartagena.com   ***REMOVED***');
-    console.log('  Repartidor (Cartagena) pedro@papeleriacartagena.com    ***REMOVED***');
-    console.log('  Repartidor (Bogotá)    lucia@papeleriacartagena.com    ***REMOVED***');
+    console.log(`  Admin                  admin@papeleriacartagena.com    ${SEED_PASSWORDS.admin}`);
+    console.log(`  Asesor (Cartagena)     asesor@papeleriacartagena.com   ${SEED_PASSWORDS.asesor}`);
+    console.log(`  Asesor (Bogotá)        carlos@papeleriacartagena.com   ${SEED_PASSWORDS.asesor}`);
+    console.log(`  Repartidor (Cartagena) pedro@papeleriacartagena.com    ${SEED_PASSWORDS.repartidor}`);
+    console.log(`  Repartidor (Bogotá)    lucia@papeleriacartagena.com    ${SEED_PASSWORDS.repartidor}`);
     console.log('  ─── Papelería El Centro (Lista B) ─────────────────');
-    console.log('  Supervisor Bogotá      supervisor@elcentro.com         ***REMOVED***');
-    console.log('  Creador Bogotá         pedidos@elcentro.com            ***REMOVED***');
-    console.log('  Admin de empresa       admin@elcentro.com              ***REMOVED***');
-    console.log('  Supervisor Medellín    supervisor.medellin@elcentro.com ***REMOVED***');
-    console.log('  Creador Medellín       pedidos.medellin@elcentro.com   ***REMOVED***');
+    console.log(`  Supervisor Bogotá      supervisor@elcentro.com         ${SEED_PASSWORDS.supervisor}`);
+    console.log(`  Creador Bogotá         pedidos@elcentro.com            ${SEED_PASSWORDS.creador}`);
+    console.log(`  Admin de empresa       admin@elcentro.com              ${SEED_PASSWORDS.adminEmpresa}`);
+    console.log(`  Supervisor Medellín    supervisor.medellin@elcentro.com ${SEED_PASSWORDS.supervisor}`);
+    console.log(`  Creador Medellín       pedidos.medellin@elcentro.com   ${SEED_PASSWORDS.creador}`);
     console.log('  ─── Distribuciones Norte (Lista C) ────────────────');
-    console.log('  Supervisor             supervisor@distnorte.com        ***REMOVED***');
-    console.log('  Creador                pedidos@distnorte.com           ***REMOVED***');
+    console.log(`  Supervisor             supervisor@distnorte.com        ${SEED_PASSWORDS.supervisor}`);
+    console.log(`  Creador                pedidos@distnorte.com           ${SEED_PASSWORDS.creador}`);
     console.log('  ─── Colegio San Andrés (Lista A) ──────────────────');
-    console.log('  Rectoría (supervisor)  rectoria@colegiosanandres.edu.co ***REMOVED***');
-    console.log('  Compras (creador)      compras@colegiosanandres.edu.co ***REMOVED***');
+    console.log(`  Rectoría (supervisor)  rectoria@colegiosanandres.edu.co ${SEED_PASSWORDS.supervisor}`);
+    console.log(`  Compras (creador)      compras@colegiosanandres.edu.co ${SEED_PASSWORDS.creador}`);
     console.log('');
   } catch (err) {
     await client.query('ROLLBACK');

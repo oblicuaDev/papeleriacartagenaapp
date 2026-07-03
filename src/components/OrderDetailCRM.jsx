@@ -475,7 +475,19 @@ export default function OrderDetailCRM({
 
   // Asignacion de asesor / repartidor: refresca timeline y comentarios
   // porque el backend registra un comment de sistema cuando cambia delivery.
+  //
+  // Al asignar repartidor mientras el pedido esta en "Validar disponibilidad"
+  // avanzamos el estado a "Alistamiento" en la misma llamada: el repartidor
+  // solo ve pedidos en estados operativos (Alistamiento/En Ruta/Entregado),
+  // asi que sin este avance el pedido quedaba asignado pero invisible para el.
   async function handleAssign(updates) {
+    if (
+      updates.deliveryId &&
+      order.status === "Validar disponibilidad" &&
+      updates.status === undefined
+    ) {
+      updates = { ...updates, status: "Alistamiento" };
+    }
     try {
       await updateOrder(order.id, updates);
       // Refrescar el pedido completo: la asignacion inserta un comment de
@@ -880,6 +892,13 @@ export default function OrderDetailCRM({
                   <p className="text-xs text-gray-400 mt-1">
                     Solo el repartidor asignado puede actualizar el estado de entrega.
                   </p>
+                  {order.deliveryId &&
+                    !["Alistamiento", "En Ruta", "Entregado"].includes(order.status) && (
+                      <p className="text-xs text-amber-600 mt-1">
+                        El repartidor todavia no vera este pedido: falta validar
+                        disponibilidad para pasarlo a Alistamiento.
+                      </p>
+                    )}
                 </div>
               )}
 

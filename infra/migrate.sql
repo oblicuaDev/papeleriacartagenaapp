@@ -349,6 +349,35 @@ CREATE INDEX IF NOT EXISTS idx_order_attachments_order  ON order_attachments(ord
 CREATE INDEX IF NOT EXISTS idx_complementaries_product  ON product_complementaries(product_id);
 
 -- ----------------------------------------------------------
+-- 15. order_item_changes — Trazabilidad de cambios de items durante
+--     "Validar disponibilidad" (migración 011, fusionada aquí porque
+--     el aprovisionamiento real solo corre este archivo)
+-- ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS order_item_changes (
+    id              SERIAL         PRIMARY KEY,
+    order_id        VARCHAR(20)    NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    product_id      INTEGER        NOT NULL,
+    product_name    VARCHAR(300)   NOT NULL,
+    sku             VARCHAR(50),
+    action          VARCHAR(20)    NOT NULL,
+    prev_quantity   INTEGER,
+    new_quantity    INTEGER,
+    prev_unit_price NUMERIC(12, 2),
+    new_unit_price  NUMERIC(12, 2),
+    reason          TEXT           NOT NULL,
+    changed_by      INTEGER        REFERENCES users(id) ON DELETE SET NULL,
+    created_at      TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_oic_action CHECK (action IN ('updated', 'removed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_oic_order      ON order_item_changes(order_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_oic_changed_by ON order_item_changes(changed_by);
+
+-- products.not_in_catalog (migración 012, misma razón)
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS not_in_catalog BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ----------------------------------------------------------
 -- Función auxiliar: generar ID de pedido (ORD-00001)
 -- ----------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_generate_order_id()

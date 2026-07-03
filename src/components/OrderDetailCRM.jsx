@@ -478,10 +478,15 @@ export default function OrderDetailCRM({
   async function handleAssign(updates) {
     try {
       await updateOrder(order.id, updates);
-      // Recargar comentarios (la asignacion de repartidor inserta un comment de sistema)
+      // Refrescar el pedido completo: la asignacion inserta un comment de
+      // sistema y el prop `order` debe reflejar el nuevo advisorId/deliveryId
+      // (el padre solo lo carga una vez al montar).
       try {
         const fresh = await ordersApi.get(order.id);
-        if (Array.isArray(fresh?.comments)) setLocalComments(fresh.comments);
+        if (fresh) {
+          Object.assign(order, fresh);
+          if (Array.isArray(fresh.comments)) setLocalComments(fresh.comments);
+        }
       } catch {}
       setTimelineRefreshKey((k) => k + 1);
     } catch (err) {
@@ -559,16 +564,35 @@ export default function OrderDetailCRM({
     setLocalAttachments((prev) => prev.filter((a) => a.id !== attId));
   }
 
-  // PHASE 7: el PDF de orden de compra existe como adjunto type='purchase_order'
-  // a partir del momento en que el pedido se aprueba.
-  const purchaseOrderPdf = (localAttachments || []).find(
-    (a) => a.type === "purchase_order",
-  );
+  // La orden de compra se puede generar en vivo (via /orders/:id/purchase-order.pdf)
+  // desde que el pedido sale de "Pendiente por aprobar" — no depende de que exista
+  // el adjunto guardado en storage.
+  const purchaseOrderAvailable =
+    order.status !== "Pendiente por aprobar" && order.status !== "Rechazado";
 
-  function handleOpenPurchaseOrder() {
-    if (!purchaseOrderPdf) return;
-    const url = purchaseOrderPdf.fileUrl || purchaseOrderPdf.url;
-    if (url) window.open(url, "_blank", "noopener");
+  const [openingPurchaseOrder, setOpeningPurchaseOrder] = useState(false);
+  async function handleOpenPurchaseOrder() {
+    if (!purchaseOrderAvailable || openingPurchaseOrder) return;
+    setOpeningPurchaseOrder(true);
+    try {
+      const baseUrl = (import.meta.env.VITE_API_URL || "/api/v1").replace(
+        /\/$/,
+        "",
+      );
+      const token = localStorage.getItem("pc_token");
+      const res = await fetch(`${baseUrl}/orders/${order.id}/purchase-order.pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      alert(err?.message || "No se pudo abrir la orden de compra");
+    } finally {
+      setOpeningPurchaseOrder(false);
+    }
   }
 
   // Excel detallado del pedido
@@ -617,14 +641,14 @@ export default function OrderDetailCRM({
         <div className="flex items-center gap-2">
           <button
             onClick={handleOpenPurchaseOrder}
-            disabled={!purchaseOrderPdf}
+            disabled={!purchaseOrderAvailable || openingPurchaseOrder}
             title={
-              purchaseOrderPdf
+              purchaseOrderAvailable
                 ? "Abrir orden de compra"
                 : "Disponible cuando el pedido se apruebe"
             }
             className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition ${
-              purchaseOrderPdf
+              purchaseOrderAvailable
                 ? "border-red-200 text-red-700 bg-red-50 hover:bg-red-100 hover:border-red-300"
                 : "border-red-100 text-red-300 bg-red-50 opacity-60 cursor-not-allowed select-none"
             }`}

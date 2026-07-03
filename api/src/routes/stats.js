@@ -45,7 +45,14 @@ function buildScopeFilter(req) {
 }
 
 // GET /stats/admin
-router.get('/admin', requireRole('admin'), async (_req, res) => {
+router.get('/admin', requireRole('admin'), async (req, res) => {
+  const { dateFrom, dateTo } = req.query;
+  const rangeParams = [];
+  const rangeConds = [];
+  if (dateFrom) rangeConds.push(`o.created_at >= $${rangeParams.push(dateFrom)}`);
+  if (dateTo)   rangeConds.push(`o.created_at <= $${rangeParams.push(dateTo + ' 23:59:59')}`);
+  const rangeWhere = rangeConds.length ? 'AND ' + rangeConds.join(' AND ') : '';
+
   try {
     const [
       { rows: totalRows },
@@ -54,6 +61,8 @@ router.get('/admin', requireRole('admin'), async (_req, res) => {
       { rows: revenueRows },
       { rows: clientRows },
       { rows: productRows },
+      { rows: topProdRows },
+      { rows: deliveredUnitRows },
     ] = await Promise.all([
       pool.query(`SELECT COUNT(*) AS total, COALESCE(SUM(total), 0) AS revenue FROM orders`),
       pool.query(`
@@ -74,6 +83,24 @@ router.get('/admin', requireRole('admin'), async (_req, res) => {
         LIMIT 12`),
       pool.query(`SELECT COUNT(*) AS count FROM users WHERE role = 'client' AND active = true`),
       pool.query(`SELECT COUNT(*) AS count FROM products WHERE active = true`),
+      pool.query(
+        `SELECT oi.product_id, oi.product_name, oi.sku,
+                SUM(oi.quantity)::int AS quantity
+         FROM orders o
+         JOIN order_items oi ON oi.order_id = o.id
+         WHERE o.status NOT IN ('Pendiente por aprobar', 'Rechazado') ${rangeWhere}
+         GROUP BY oi.product_id, oi.product_name, oi.sku
+         ORDER BY quantity DESC
+         LIMIT 10`,
+        rangeParams
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(oi.quantity), 0)::int AS units
+         FROM orders o
+         JOIN order_items oi ON oi.order_id = o.id
+         WHERE o.status = 'Entregado' ${rangeWhere}`,
+        rangeParams
+      ),
     ]);
 
     const ordersByStatus = {};
@@ -93,6 +120,8 @@ router.get('/admin', requireRole('admin'), async (_req, res) => {
       activeProducts:   parseInt(productRows[0].count),
       ordersByStatus,
       revenueByMonth:   revenueRows.reverse(),
+      topProducts:      topProdRows,
+      deliveredUnits:   parseInt(deliveredUnitRows[0].units),
     });
   } catch (err) {
     console.error(err);

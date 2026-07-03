@@ -543,6 +543,17 @@ router.post('/', requireRole('client'), async (req, res) => {
     );
 
     await client.query('COMMIT');
+
+    // PHASE 7: si el pedido nace ya aprobado (supervisor, flujo legacy),
+    // generar la orden de compra igual que en la aprobacion via PUT /:id.
+    if (initialStatus === 'Pendiente') {
+      try {
+        await ensurePurchaseOrderPdf(newId, clientId);
+      } catch (pdfErr) {
+        console.error(`[orders] No se pudo generar PDF de ${newId}:`, pdfErr);
+      }
+    }
+
     return res.status(201).json({
       id:          newId,
       status:      initialStatus,

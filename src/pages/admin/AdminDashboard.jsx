@@ -56,10 +56,10 @@ export default function AdminDashboard() {
   const [dateTo, setDateTo]     = useState('');
   const [stats, setStats]       = useState(null);
 
-  // Cargar stats del servidor (clientes activos, revenue, etc.)
+  // Cargar stats del servidor (clientes activos, revenue, top productos, etc.)
   useEffect(() => {
-    statsApi.admin().then(setStats).catch(() => {});
-  }, []);
+    statsApi.admin({ dateFrom, dateTo }).then(setStats).catch(() => {});
+  }, [dateFrom, dateTo]);
 
   const isFiltered = dateFrom || dateTo;
 
@@ -78,26 +78,17 @@ export default function AdminDashboard() {
   const deliveredPct    = filtered.length > 0
     ? Math.round((deliveredOrders.length / filtered.length) * 100)
     : 0;
-  // items puede no estar en el listado (solo en detalle), usar itemCount como fallback
-  const deliveredUnits = deliveredOrders.reduce(
-    (sum, o) => sum + (o.items?.reduce((s, i) => s + i.quantity, 0) ?? o.itemCount ?? 0), 0
-  );
+  // Agregados calculados en el servidor (join con order_items, respeta el rango de fechas)
+  const deliveredUnits = stats?.deliveredUnits ?? 0;
+  const topProducts = (stats?.topProducts ?? []).map(p => ({
+    productId: p.productId,
+    name: p.productName,
+    qty: p.quantity,
+  }));
 
   const recentOrders = [...filtered]
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
     .slice(0, 5);
-
-  // Top productos: solo si los items están disponibles
-  const productQtyMap = {};
-  filtered.forEach(o => (o.items || []).forEach(item => {
-    if (!productQtyMap[item.productId]) {
-      productQtyMap[item.productId] = { productId: item.productId, name: item.productName, qty: 0 };
-    }
-    productQtyMap[item.productId].qty += item.quantity;
-  }));
-  const topProducts = Object.values(productQtyMap)
-    .sort((a, b) => b.qty - a.qty)
-    .slice(0, 10);
 
   const monthlyMap = {};
   MONTHS.forEach((_, i) => { monthlyMap[i] = 0; });

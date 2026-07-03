@@ -162,7 +162,10 @@ export const ordersApi = {
 
 // ── Stats ───────────────────────────────────────────────────
 export const statsApi = {
-  admin:  () => get('/stats/admin'),
+  admin:  (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return get('/stats/admin' + (qs ? `?${qs}` : ''));
+  },
   advisor: () => get('/stats/advisor'),
   client: (params = {}) => {
     const qs = new URLSearchParams(params).toString();

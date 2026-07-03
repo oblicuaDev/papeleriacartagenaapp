@@ -313,15 +313,9 @@ export default function ClientCatalog() {
     handleAdd(product, 1);
   }
 
-  // Click en tarjeta/fila: agrega directo al carrito (qty 1) sin abrir modal.
-  // El modal se reserva para casos que requieran configuracion (variantes,
-  // opciones obligatorias) — no se dispara automaticamente al hacer click.
+  // Click en tarjeta/fila: abre el modal para elegir cantidad antes de agregar.
   function handleCardClick(product) {
-    if (isReadOnly) {
-      setModalProduct(product);
-      return;
-    }
-    handleAdd(product, 1);
+    setModalProduct(product);
   }
 
   function handleOpenDetail(e, product) {

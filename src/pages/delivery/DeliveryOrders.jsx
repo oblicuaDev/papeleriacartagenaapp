@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Truck, Package, Calendar, ArrowRight, CheckCircle2, MapPin } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -13,11 +13,18 @@ const DELIVERY_TABS = [
 
 export default function DeliveryOrders() {
   const navigate = useNavigate();
-  const { orders, updateOrder } = useApp();
+  const { orders, updateOrder, refreshOrders } = useApp();
   const [tab, setTab]                     = useState('Alistamiento');
   const [updating, setUpdating]           = useState(null);
   const [error, setError]                 = useState(null);
   const [carrierByOrder, setCarrierByOrder] = useState({});
+
+  // El repartidor puede recibir pedidos recien asignados por el asesor/admin
+  // en otra sesion: refrescar al entrar a la vista en vez de depender solo
+  // del snapshot cargado al iniciar sesion.
+  useEffect(() => {
+    refreshOrders().catch(() => {});
+  }, []);
 
   const filtered = orders
     .filter(o => o.status === tab)

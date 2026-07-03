@@ -14,12 +14,8 @@
 Abre una terminal como **Administrador** y ejecuta:
 
 ```bash
-PGPASSWORD=P5QlJdd4_1995 psql -U Jdd4 -h localhost -f infra/setup-dev.sql
+PGPASSWORD=tu_password_postgres psql -U tu_usuario_postgres -h localhost -f infra/setup-dev.sql
 ```
-
-PGPASSWORD=P5QlJdd4_1995 psql -U Jdd4 -h localhost -d daval_db_dev -f infra/setup-dev.sql
-
-PGPASSWORD=P5QlJdd4_1995 psql -U Jdd4 -h localhost -d postgres
 
 ### 2. Crear tablas (migraciones)
 

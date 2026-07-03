@@ -132,11 +132,25 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
 // GET /stats/advisor
 router.get('/advisor', requireRole('advisor'), async (req, res) => {
   const advisorId = req.user.id;
+  const { dateFrom, dateTo, companyId } = req.query;
+
+  // Filtro de rango/empresa reutilizado en las queries agregadas de items.
+  // (las de total/mes/status se dejan como estaban, sin filtro de periodo,
+  // para no cambiar el significado de "mis pedidos" ya usado en otras vistas)
+  const rangeParams = [advisorId];
+  const rangeConds = [`o.advisor_id = $1`];
+  if (companyId) rangeConds.push(`uc.company_id = $${rangeParams.push(parseInt(companyId))}`);
+  if (dateFrom)  rangeConds.push(`o.created_at >= $${rangeParams.push(dateFrom)}`);
+  if (dateTo)    rangeConds.push(`o.created_at <= $${rangeParams.push(dateTo + ' 23:59:59')}`);
+  const rangeWhere = rangeConds.join(' AND ');
+
   try {
     const [
       { rows: totalRows },
       { rows: monthRows },
       { rows: statusRows },
+      { rows: topProdRows },
+      { rows: deliveredUnitRows },
     ] = await Promise.all([
       pool.query(
         `SELECT COUNT(*) AS total, COALESCE(SUM(total), 0) AS revenue
@@ -154,6 +168,26 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
          WHERE advisor_id = $1 GROUP BY status`,
         [advisorId]
       ),
+      pool.query(
+        `SELECT oi.product_id, oi.product_name, oi.sku,
+                SUM(oi.quantity)::int AS quantity
+         FROM orders o
+         JOIN users uc ON uc.id = o.client_id
+         JOIN order_items oi ON oi.order_id = o.id
+         WHERE ${rangeWhere} AND o.status NOT IN ('Pendiente por aprobar', 'Rechazado')
+         GROUP BY oi.product_id, oi.product_name, oi.sku
+         ORDER BY quantity DESC
+         LIMIT 10`,
+        rangeParams
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(oi.quantity), 0)::int AS units
+         FROM orders o
+         JOIN users uc ON uc.id = o.client_id
+         JOIN order_items oi ON oi.order_id = o.id
+         WHERE ${rangeWhere} AND o.status = 'Entregado'`,
+        rangeParams
+      ),
     ]);
 
     const ordersByStatus = {};
@@ -168,6 +202,8 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
       myRevenue:        parseFloat(totalRows[0].revenue),
       pendingForMe,
       ordersByStatus,
+      topProducts:      topProdRows,
+      deliveredUnits:   parseInt(deliveredUnitRows[0].units),
     });
   } catch (err) {
     console.error(err);

@@ -166,7 +166,10 @@ export const statsApi = {
     const qs = new URLSearchParams(params).toString();
     return get('/stats/admin' + (qs ? `?${qs}` : ''));
   },
-  advisor: () => get('/stats/advisor'),
+  advisor: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return get('/stats/advisor' + (qs ? `?${qs}` : ''));
+  },
   client: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return get('/stats/client' + (qs ? `?${qs}` : ''));

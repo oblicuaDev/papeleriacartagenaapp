@@ -4,6 +4,7 @@ import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2, Build
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { statsApi } from '../../services/api';
 import { STATUS_STYLES, formatCOP, statusLabel } from '../../data/mockData';
 
 // Estados en los que el asesor puede gestionar (no solo ver).
@@ -59,6 +60,7 @@ export default function AdvisorOrders() {
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
   const [companyFilter, setCompanyFilter] = useState('');
+  const [stats, setStats] = useState(null);
 
   // Inicializa el filtro empresa desde la URL (?empresa=N) cuando se navega
   // desde la vista de empresas asignadas.
@@ -66,6 +68,12 @@ export default function AdvisorOrders() {
     const fromUrl = searchParams.get('empresa');
     if (fromUrl) setCompanyFilter(fromUrl);
   }, [searchParams]);
+
+  // Top 10 productos y unidades entregadas: agregados en el backend (join con
+  // order_items), porque el listado de pedidos nunca trae `items` completos.
+  useEffect(() => {
+    statsApi.advisor({ dateFrom, dateTo, companyId: companyFilter }).then(setStats).catch(() => {});
+  }, [dateFrom, dateTo, companyFilter]);
 
   const userById = useMemo(() => {
     const m = {};
@@ -95,19 +103,12 @@ export default function AdvisorOrders() {
   const deliveredPct = myOrders.length > 0
     ? Math.round((deliveredOrders.length / myOrders.length) * 100)
     : 0;
-  const deliveredUnits = deliveredOrders.reduce(
-    (sum, o) => sum + (o.items || []).reduce((s, i) => s + i.quantity, 0), 0
-  );
-
-  // Top 10 productos
-  const productQtyMap = {};
-  myOrders.forEach(o => (o.items || []).forEach(item => {
-    if (!productQtyMap[item.productId]) {
-      productQtyMap[item.productId] = { productId: item.productId, name: item.productName, qty: 0 };
-    }
-    productQtyMap[item.productId].qty += item.quantity;
+  const deliveredUnits = stats?.deliveredUnits ?? 0;
+  const topProducts = (stats?.topProducts ?? []).map(p => ({
+    productId: p.productId,
+    name: p.productName,
+    qty: p.quantity,
   }));
-  const topProducts = Object.values(productQtyMap).sort((a, b) => b.qty - a.qty).slice(0, 10);
 
   // Histórico mensual
   const monthlyMap = {};
@@ -254,7 +255,7 @@ export default function AdvisorOrders() {
                     <td className="px-5 py-4 text-sm font-mono font-medium text-blue-700">{order.id}</td>
                     <td className="px-5 py-4 text-sm text-gray-700">{getClientName(order)}</td>
                     <td className="px-5 py-4 text-sm text-gray-500">{order.createdAt}</td>
-                    <td className="px-5 py-4 text-sm text-gray-600">{(order.items || []).length}</td>
+                    <td className="px-5 py-4 text-sm text-gray-600">{order.itemCount ?? 0}</td>
                     <td className="px-5 py-4 text-sm font-medium text-gray-800">{formatCOP(order.total)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>

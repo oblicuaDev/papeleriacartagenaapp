@@ -435,8 +435,13 @@ router.post('/', requireRole('client'), async (req, res) => {
     seen.add(it.productId);
   }
 
-  // Status inicial segun clientRole
-  const initialStatus = clientRole === 'supervisor' ? 'Pendiente' : 'Pendiente por aprobar';
+  // Status inicial segun clientRole. El supervisor se autoaprueba al crear
+  // (no necesita esperar a otro supervisor), pero igual entra al flujo de
+  // "Validar disponibilidad" del asesor -- igual que cualquier otro pedido
+  // aprobado. 'Pendiente' quedo reservado como estado legacy (ver
+  // VALID_TRANSITIONS): usarlo aqui dejaba el pedido fuera del alcance del
+  // asesor, que solo puede validar disponibilidad de pedidos en ese estado.
+  const initialStatus = clientRole === 'supervisor' ? 'Validar disponibilidad' : 'Pendiente por aprobar';
 
   const client = await pool.connect();
   try {
@@ -544,9 +549,9 @@ router.post('/', requireRole('client'), async (req, res) => {
 
     await client.query('COMMIT');
 
-    // PHASE 7: si el pedido nace ya aprobado (supervisor, flujo legacy),
+    // PHASE 7: si el pedido nace ya aprobado (supervisor se autoaprueba),
     // generar la orden de compra igual que en la aprobacion via PUT /:id.
-    if (initialStatus === 'Pendiente') {
+    if (initialStatus === 'Validar disponibilidad') {
       try {
         await ensurePurchaseOrderPdf(newId, clientId);
       } catch (pdfErr) {

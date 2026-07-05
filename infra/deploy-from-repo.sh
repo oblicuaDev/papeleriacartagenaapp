@@ -127,9 +127,16 @@ if [ "$DO_API" = "1" ]; then
   sudo systemctl status papeleria-api --no-pager -l | head -n 20
 
   echo "    Health check..."
-  sleep 2
+  HEALTH_OK=0
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 1
+    if curl -sf http://localhost:3000/health >/dev/null 2>&1; then
+      HEALTH_OK=1
+      break
+    fi
+  done
 
-  if curl -sf http://localhost:3000/health >/dev/null 2>&1; then
+  if [ "$HEALTH_OK" = "1" ]; then
     echo "    API OK"
   else
     echo "    WARNING: API no responde"

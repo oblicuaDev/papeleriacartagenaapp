@@ -2,6 +2,7 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { resolvePriceListChain, priceSqlFragmentChain } from '../lib/pricing.js';
+import { resolveActiveContractProductIds } from '../lib/contracts.js';
 
 const router = Router();
 router.use(requireAuth, requireRole('client'));
@@ -9,7 +10,7 @@ router.use(requireAuth, requireRole('client'));
 // GET /catalog
 router.get('/', async (req, res) => {
   const { id: userId, companyId } = req.user;
-  const { categoryId, search, page = 1, limit = 20 } = req.query;
+  const { categoryId, granCategoriaId, search, page = 1, limit = 20 } = req.query;
   const pageNum = Math.max(1, parseInt(page));
   const limitNum = Math.min(1000, Math.max(1, parseInt(limit)));
   const offset = (pageNum - 1) * limitNum;
@@ -35,7 +36,15 @@ router.get('/', async (req, res) => {
       'c.active = true'
     ];
 
+    // Cliente con contrato vigente -> catalogo restringido a esos SKUs.
+    const contractProductIds = await resolveActiveContractProductIds(companyId);
+    if (contractProductIds) {
+      conditions.push(`p.id = ANY($${params.push([...contractProductIds])}::int[])`);
+    }
+
     if (categoryId) conditions.push(`p.category_id = $${params.push(parseInt(categoryId))}`);
+
+    if (granCategoriaId) conditions.push(`c.gran_categoria_id = $${params.push(parseInt(granCategoriaId))}`);
 
     if (search) {
       const s = '%' + search + '%';
@@ -130,13 +139,23 @@ router.get('/related', async (req, res) => {
       listIdParams,
     });
 
+    // Cliente con contrato vigente -> sugeridos tambien restringidos a esos SKUs.
+    const contractProductIds = await resolveActiveContractProductIds(companyId);
+
     async function pickFrom(categoryIds, exclude, n) {
       if (!categoryIds.length || n <= 0) return [];
+      if (contractProductIds && contractProductIds.size === 0) return [];
       const params = [...chain];
       const catIdx = params.length + 1;
       params.push(categoryIds);
       const excludeIdx = params.length + 1;
       params.push(exclude);
+      let contractCond = '';
+      if (contractProductIds) {
+        const contractIdx = params.length + 1;
+        params.push([...contractProductIds]);
+        contractCond = `AND p.id = ANY($${contractIdx}::int[])`;
+      }
       const limitIdx = params.length + 1;
       params.push(n);
       const { rows } = await pool.query(
@@ -153,6 +172,7 @@ router.get('/related', async (req, res) => {
            AND c.active = true
            AND p.category_id = ANY($${catIdx}::int[])
            AND NOT (p.id = ANY($${excludeIdx}::int[]))
+           ${contractCond}
          ORDER BY (p.stock > 0) DESC, RANDOM()
          LIMIT $${limitIdx}`,
         params

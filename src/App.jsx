@@ -15,6 +15,7 @@ import AdminUsers from './pages/admin/AdminUsers';
 import AdminOrders from './pages/admin/AdminOrders';
 import AdminOrderDetail from './pages/admin/AdminOrderDetail';
 import AdminCompanies from './pages/admin/AdminCompanies';
+import AdminContracts from './pages/admin/AdminContracts';
 import ClientLayout from './pages/client/ClientLayout';
 import ClientCatalog from './pages/client/ClientCatalog';
 import ClientOrders from './pages/client/ClientOrders';
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="listas-precios" element={<AdminPriceLists />} />
             <Route path="pedidos/:orderId" element={<AdminOrderDetail />} />
             <Route path="empresas" element={<AdminCompanies />} />
+            <Route path="contratos" element={<AdminContracts />} />
             <Route path="clientes" element={<AdminClients />} />
             <Route path="pedidos" element={<AdminOrders />} />
             <Route path="sedes" element={<AdminBranches />} />

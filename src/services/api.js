@@ -106,6 +106,16 @@ export const categoriesApi = {
   setRelated: (id, ids)         => put(`/categories/${id}/related`, { relatedCategoryIds: ids }),
 };
 
+// ── Gran Categorías ─────────────────────────────────────────
+export const granCategoriasApi = {
+  list:   (params = {}) => get('/gran-categorias?' + new URLSearchParams(params)),
+  create: (data)        => post('/gran-categorias', data),
+  update: (id, data)    => put(`/gran-categorias/${id}`, data),
+  remove: (id)          => del(`/gran-categorias/${id}`),
+  categories:    (id)          => get(`/gran-categorias/${id}/categories`),
+  setCategories: (id, ids)     => put(`/gran-categorias/${id}/categories`, { categoryIds: ids }),
+};
+
 // ── Price Lists ─────────────────────────────────────────────
 export const priceListsApi = {
   list:   ()         => get('/price-lists'),
@@ -160,6 +170,15 @@ export const ordersApi = {
   removeAttachment: (oId, aId) => del(`/orders/${oId}/attachments/${aId}`),
 };
 
+// ── Contratos ───────────────────────────────────────────────
+export const contractsApi = {
+  list:   ()         => get('/contracts'),
+  get:    (id)        => get(`/contracts/${id}`),
+  create: (data)      => post('/contracts', data),
+  update: (id, data)  => put(`/contracts/${id}`, data),
+  remove: (id)        => del(`/contracts/${id}`),
+};
+
 // ── Stats ───────────────────────────────────────────────────
 export const statsApi = {
   admin:  (params = {}) => {
@@ -173,5 +192,21 @@ export const statsApi = {
   client: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return get('/stats/client' + (qs ? `?${qs}` : ''));
+  },
+  // Descarga el listado de pedidos (CSV/XLSX) respetando los mismos filtros
+  // de scope/fecha/usuario/linea-de-producto que /stats/client. Devuelve un
+  // Blob; la pagina que lo llama arma el link de descarga.
+  exportOrders: async (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/stats/orders/export${qs ? `?${qs}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const err = new Error(`Export fallo: HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.blob();
   },
 };

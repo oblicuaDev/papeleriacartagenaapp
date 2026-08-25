@@ -11,23 +11,25 @@ export default function ClientLayout() {
   const { currentUser, logout } = useAuth();
   const { cart, cartTotal, cartCount, updateCartItem, removeFromCart, orders, users } = useApp();
 
-  const isSupervisor   = currentUser?.clientRole === 'supervisor';
-  const isAdminEmpresa = currentUser?.clientRole === 'admin_empresa';
+  const isSupervisor    = currentUser?.clientRole === 'supervisor';
+  const isAdminEmpresa  = currentUser?.clientRole === 'admin_empresa';
+  const isAdminContrato = currentUser?.clientRole === 'administrador_contrato';
   // Supervisor NO administra empresas/sucursales/usuarios — solo ve sus pedidos.
   const canManage      = isAdminEmpresa;
 
-  // Solo el supervisor ve aprobaciones de su sucursal.
-  const supervisorClientIds = isSupervisor
+  // Supervisor ve aprobaciones de su sucursal; administrador_contrato de toda la empresa.
+  const canApprove = isSupervisor || isAdminContrato;
+  const approvalScopeIds = canApprove
     ? users
         .filter(u =>
           u.role === 'client' &&
           u.companyId === currentUser.companyId &&
-          u.sucursalId === currentUser.sucursalId
+          (isAdminContrato || u.sucursalId === currentUser.sucursalId)
         )
         .map(u => u.id)
     : [];
-  const pendingApprovalCount = isSupervisor
-    ? orders.filter(o => o.status === 'Pendiente por aprobar' && supervisorClientIds.includes(o.clientId)).length
+  const pendingApprovalCount = canApprove
+    ? orders.filter(o => o.status === 'Pendiente por aprobar' && approvalScopeIds.includes(o.clientId)).length
     : 0;
   const navigate = useNavigate();
   const [cartOpen, setCartOpen] = useState(false);
@@ -100,7 +102,7 @@ export default function ClientLayout() {
               <BarChart3 className="w-4 h-4" />
               Estadísticas
             </NavLink>
-            {isSupervisor && (
+            {canApprove && (
               <NavLink
                 to="/cliente/aprobar-pedidos"
                 className={({ isActive }) =>

@@ -11,7 +11,11 @@ router.use(requireAuth);
 // Lanza un Error con .status para errores de autorizacion.
 function buildScopeFilter(req) {
   const { role, id, companyId, clientRole, sucursalId } = req.user;
-  const { dateFrom, dateTo, status, companyId: qCompanyId, sucursalId: qSucursalId } = req.query;
+  const {
+    dateFrom, dateTo, status,
+    companyId: qCompanyId, sucursalId: qSucursalId,
+    userId: qUserId, categoryId: qCategoryId, granCategoriaId: qGranCategoriaId,
+  } = req.query;
 
   const params = [];
   const conds = [];
@@ -27,8 +31,8 @@ function buildScopeFilter(req) {
     // Supervisor solo ve su sucursal
     conds.push(`uc.company_id = $${params.push(companyId)}`);
     conds.push(`uc.sucursal_id = $${params.push(sucursalId ?? null)}`);
-  } else if (role === 'client' && clientRole === 'admin_empresa') {
-    // admin_empresa ve toda su empresa, opcionalmente filtrado por sucursal
+  } else if (role === 'client' && (clientRole === 'admin_empresa' || clientRole === 'administrador_contrato')) {
+    // admin_empresa/administrador_contrato ven toda su empresa, opcionalmente filtrado por sucursal
     conds.push(`uc.company_id = $${params.push(companyId)}`);
     if (qSucursalId) conds.push(`uc.sucursal_id = $${params.push(parseInt(qSucursalId))}`);
   } else {
@@ -37,9 +41,32 @@ function buildScopeFilter(req) {
     throw e;
   }
 
+  // Usuario gestor: solo tiene sentido en vistas agregadas de cliente
+  // (supervisor/admin_empresa/administrador_contrato). uc.id ya viene acotado
+  // por company_id/sucursal_id arriba, asi que agregar este filtro nunca
+  // permite ver usuarios fuera del scope ya resuelto.
+  if (qUserId && role === 'client' && (clientRole === 'supervisor' || clientRole === 'admin_empresa' || clientRole === 'administrador_contrato')) {
+    conds.push(`uc.id = $${params.push(parseInt(qUserId))}`);
+  }
+
   if (status)   conds.push(`o.status = $${params.push(status)}`);
   if (dateFrom) conds.push(`o.created_at >= $${params.push(dateFrom)}`);
   if (dateTo)   conds.push(`o.created_at <= $${params.push(dateTo + ' 23:59:59')}`);
+
+  // Linea de producto: categoria (chica) o gran categoria (grande), mutuamente excluyentes.
+  // EXISTS en vez de JOIN para no multiplicar filas de orders (rompería los SUM agregados).
+  if (qCategoryId) {
+    conds.push(`EXISTS (
+      SELECT 1 FROM order_items oi JOIN products p ON p.id = oi.product_id
+      WHERE oi.order_id = o.id AND p.category_id = $${params.push(parseInt(qCategoryId))}
+    )`);
+  } else if (qGranCategoriaId) {
+    conds.push(`EXISTS (
+      SELECT 1 FROM order_items oi JOIN products p ON p.id = oi.product_id
+      JOIN categories c ON c.id = p.category_id
+      WHERE oi.order_id = o.id AND c.gran_categoria_id = $${params.push(parseInt(qGranCategoriaId))}
+    )`);
+  }
 
   return { conditions: conds, params };
 }
@@ -51,7 +78,10 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
   const rangeConds = [];
   if (dateFrom) rangeConds.push(`o.created_at >= $${rangeParams.push(dateFrom)}`);
   if (dateTo)   rangeConds.push(`o.created_at <= $${rangeParams.push(dateTo + ' 23:59:59')}`);
-  const rangeWhere = rangeConds.length ? 'AND ' + rangeConds.join(' AND ') : '';
+  // rangeWhere: para queries con FROM orders o (WHERE independiente).
+  // rangeWhereAnd: para queries que ya traen su propio WHERE (ej. status NOT IN...).
+  const rangeWhere    = rangeConds.length ? 'WHERE ' + rangeConds.join(' AND ') : '';
+  const rangeWhereAnd = rangeConds.length ? 'AND ' + rangeConds.join(' AND ') : '';
 
   try {
     const [
@@ -64,9 +94,19 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
       { rows: topProdRows },
       { rows: deliveredUnitRows },
     ] = await Promise.all([
-      pool.query(`SELECT COUNT(*) AS total, COALESCE(SUM(total), 0) AS revenue FROM orders`),
+      pool.query(
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(o.subtotal), 0) AS subtotal,
+                COALESCE(SUM(o.iva), 0) AS iva,
+                COALESCE(SUM(o.total), 0) AS revenue
+         FROM orders o ${rangeWhere}`,
+        rangeParams
+      ),
       pool.query(`
-        SELECT COUNT(*) AS total, COALESCE(SUM(total), 0) AS revenue
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(subtotal), 0) AS subtotal,
+               COALESCE(SUM(iva), 0) AS iva,
+               COALESCE(SUM(total), 0) AS revenue
         FROM orders
         WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())`),
       pool.query(`
@@ -74,13 +114,18 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
         FROM orders
         WHERE status NOT IN ('Pendiente por aprobar', 'Rechazado')
         GROUP BY status`),
-      pool.query(`
-        SELECT TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') AS month,
-               COALESCE(SUM(total), 0) AS revenue
-        FROM orders
-        GROUP BY 1
-        ORDER BY 1 DESC
-        LIMIT 12`),
+      pool.query(
+        `SELECT TO_CHAR(DATE_TRUNC('month', o.created_at), 'YYYY-MM') AS month,
+                COALESCE(SUM(o.subtotal), 0) AS subtotal,
+                COALESCE(SUM(o.iva), 0) AS iva,
+                COALESCE(SUM(o.total), 0) AS revenue
+         FROM orders o
+         ${rangeWhere}
+         GROUP BY 1
+         ORDER BY 1 DESC
+         LIMIT 12`,
+        rangeParams
+      ),
       pool.query(`SELECT COUNT(*) AS count FROM users WHERE role = 'client' AND active = true`),
       pool.query(`SELECT COUNT(*) AS count FROM products WHERE active = true`),
       pool.query(
@@ -88,7 +133,7 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
                 SUM(oi.quantity)::int AS quantity
          FROM orders o
          JOIN order_items oi ON oi.order_id = o.id
-         WHERE o.status NOT IN ('Pendiente por aprobar', 'Rechazado') ${rangeWhere}
+         WHERE o.status NOT IN ('Pendiente por aprobar', 'Rechazado') ${rangeWhereAnd}
          GROUP BY oi.product_id, oi.product_name, oi.sku
          ORDER BY quantity DESC
          LIMIT 10`,
@@ -98,7 +143,7 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
         `SELECT COALESCE(SUM(oi.quantity), 0)::int AS units
          FROM orders o
          JOIN order_items oi ON oi.order_id = o.id
-         WHERE o.status = 'Entregado' ${rangeWhere}`,
+         WHERE o.status = 'Entregado' ${rangeWhereAnd}`,
         rangeParams
       ),
     ]);
@@ -113,7 +158,11 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
     return res.json({
       totalOrders:      parseInt(totalRows[0].total),
       ordersThisMonth:  parseInt(monthRows[0].total),
+      totalSubtotal:    parseFloat(totalRows[0].subtotal),
+      totalIva:         parseFloat(totalRows[0].iva),
       totalRevenue:     parseFloat(totalRows[0].revenue),
+      subtotalThisMonth:parseFloat(monthRows[0].subtotal),
+      ivaThisMonth:     parseFloat(monthRows[0].iva),
       revenueThisMonth: parseFloat(monthRows[0].revenue),
       pendingOrders,
       activeClients:    parseInt(clientRows[0].count),
@@ -153,12 +202,21 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
       { rows: deliveredUnitRows },
     ] = await Promise.all([
       pool.query(
-        `SELECT COUNT(*) AS total, COALESCE(SUM(total), 0) AS revenue
-         FROM orders WHERE advisor_id = $1`,
-        [advisorId]
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(o.subtotal), 0) AS subtotal,
+                COALESCE(SUM(o.iva), 0) AS iva,
+                COALESCE(SUM(o.total), 0) AS revenue
+         FROM orders o
+         JOIN users uc ON uc.id = o.client_id
+         WHERE ${rangeWhere}`,
+        rangeParams
       ),
       pool.query(
-        `SELECT COUNT(*) AS total FROM orders
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(subtotal), 0) AS subtotal,
+                COALESCE(SUM(iva), 0) AS iva,
+                COALESCE(SUM(total), 0) AS revenue
+         FROM orders
          WHERE advisor_id = $1
            AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())`,
         [advisorId]
@@ -199,7 +257,12 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
     return res.json({
       myOrders:         parseInt(totalRows[0].total),
       myOrdersThisMonth:parseInt(monthRows[0].total),
+      mySubtotal:       parseFloat(totalRows[0].subtotal),
+      myIva:            parseFloat(totalRows[0].iva),
       myRevenue:        parseFloat(totalRows[0].revenue),
+      subtotalThisMonth:parseFloat(monthRows[0].subtotal),
+      ivaThisMonth:     parseFloat(monthRows[0].iva),
+      revenueThisMonth: parseFloat(monthRows[0].revenue),
       pendingForMe,
       ordersByStatus,
       topProducts:      topProdRows,
@@ -216,12 +279,25 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
 //   - creador_pedidos: stats de sus propios pedidos
 router.get('/client', requireRole('client'), async (req, res) => {
   const { id: myId, companyId, clientRole, sucursalId } = req.user;
-  const { sucursalId: qSucursalId } = req.query;
+  const {
+    sucursalId: qSucursalId, userId: qUserId,
+    categoryId: qCategoryId, granCategoriaId: qGranCategoriaId,
+  } = req.query;
+  let { dateFrom, dateTo } = req.query;
 
-  //   creador_pedidos: ve sus propios pedidos
-  //   supervisor:      ve los pedidos de su sucursal
-  //   admin_empresa:   ve los pedidos de toda la empresa (filtro opcional por sucursalId)
-  const isCompanyWide = clientRole === 'admin_empresa';
+  // Default: ultimos 6 meses si no se especifica dateFrom, para no cargar
+  // todo el historico cuando el frontend no manda filtro explicito.
+  if (!dateFrom) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 6);
+    dateFrom = d.toISOString().slice(0, 10);
+  }
+
+  //   creador_pedidos:        ve sus propios pedidos
+  //   supervisor:             ve los pedidos de su sucursal
+  //   admin_empresa:          ve los pedidos de toda la empresa (filtro opcional por sucursalId), solo lectura
+  //   administrador_contrato: igual que admin_empresa para lectura/dashboard, pero puede aprobar/editar
+  const isCompanyWide = clientRole === 'admin_empresa' || clientRole === 'administrador_contrato';
   const isSupervisor  = clientRole === 'supervisor';
 
   let where;
@@ -241,6 +317,32 @@ router.get('/client', requireRole('client'), async (req, res) => {
     where  = `o.client_id = $1`;
     params = [myId];
   }
+
+  // Usuario gestor: solo en vistas agregadas (supervisor/admin_empresa). uc.id ya
+  // queda acotado por company_id/sucursal_id arriba, no hay fuga de scope posible.
+  if (qUserId && (isSupervisor || isCompanyWide)) {
+    where += ` AND uc.id = $${params.push(parseInt(qUserId))}`;
+  }
+
+  // Rango de fechas (aplica a totalRows/statusRows/monthlyRows/topProdRows/topUserRows,
+  // que comparten `where`; monthRows agrega ademas su propio filtro de mes calendario).
+  where += ` AND o.created_at >= $${params.push(dateFrom)}`;
+  if (dateTo) where += ` AND o.created_at <= $${params.push(dateTo + ' 23:59:59')}`;
+
+  // Linea de producto: categoria (chica) o gran categoria (grande), mutuamente excluyentes.
+  if (qCategoryId) {
+    where += ` AND EXISTS (
+      SELECT 1 FROM order_items oi JOIN products p ON p.id = oi.product_id
+      WHERE oi.order_id = o.id AND p.category_id = $${params.push(parseInt(qCategoryId))}
+    )`;
+  } else if (qGranCategoriaId) {
+    where += ` AND EXISTS (
+      SELECT 1 FROM order_items oi JOIN products p ON p.id = oi.product_id
+      JOIN categories c ON c.id = p.category_id
+      WHERE oi.order_id = o.id AND c.gran_categoria_id = $${params.push(parseInt(qGranCategoriaId))}
+    )`;
+  }
+
   const fromJoin = `FROM orders o JOIN users uc ON uc.id = o.client_id`;
 
   try {
@@ -254,12 +356,16 @@ router.get('/client', requireRole('client'), async (req, res) => {
     ] = await Promise.all([
       pool.query(
         `SELECT COUNT(*) AS total,
+                COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS subtotal,
+                COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS iva,
                 COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS revenue
          ${fromJoin} WHERE ${where}`,
         params
       ),
       pool.query(
         `SELECT COUNT(*) AS total,
+                COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS subtotal,
+                COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS iva,
                 COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS revenue
          ${fromJoin}
          WHERE ${where}
@@ -275,6 +381,8 @@ router.get('/client', requireRole('client'), async (req, res) => {
       pool.query(
         `SELECT TO_CHAR(DATE_TRUNC('month', o.created_at), 'YYYY-MM') AS month,
                 COUNT(*)::int AS orders,
+                COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS subtotal,
+                COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS iva,
                 COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS revenue
          ${fromJoin} WHERE ${where}
          GROUP BY 1
@@ -300,6 +408,8 @@ router.get('/client', requireRole('client'), async (req, res) => {
         ? pool.query(
             `SELECT uc.id AS user_id, uc.name AS user_name,
                     COUNT(*)::int AS orders,
+                    COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS subtotal,
+                    COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS iva,
                     COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS revenue
              ${fromJoin}
              WHERE ${where}
@@ -337,9 +447,15 @@ router.get('/client', requireRole('client'), async (req, res) => {
 
     return res.json({
       scope: isCompanyWide ? 'company' : isSupervisor ? 'sucursal' : 'self',
+      appliedDateFrom:  dateFrom,
+      appliedDateTo:    dateTo || null,
       totalOrders:      parseInt(totalRows[0].total),
       ordersThisMonth:  parseInt(monthRows[0].total),
+      totalSubtotal:    parseFloat(totalRows[0].subtotal),
+      totalIva:         parseFloat(totalRows[0].iva),
       totalSpent:       parseFloat(totalRows[0].revenue),
+      subtotalThisMonth:parseFloat(monthRows[0].subtotal),
+      ivaThisMonth:     parseFloat(monthRows[0].iva),
       spentThisMonth:   parseFloat(monthRows[0].revenue),
       ordersByStatus,
       monthly:          monthlyRows.reverse(),
@@ -381,6 +497,8 @@ router.get('/orders/export', async (req, res) => {
               s.name  AS sucursal,
               uc.name AS client,
               ua.name AS advisor,
+              o.subtotal::float AS subtotal,
+              o.iva::float AS iva,
               o.total::float AS total,
               (SELECT COUNT(*) FROM order_items WHERE order_id = o.id)::int AS items
          FROM orders o

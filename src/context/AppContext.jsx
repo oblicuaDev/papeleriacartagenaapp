@@ -1,8 +1,10 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { useAuth } from "./AuthContext";
+import { splitIva } from "../data/mockData";
 import {
   productsApi,
   categoriesApi,
+  granCategoriasApi,
   priceListsApi,
   branchesApi,
   ordersApi,
@@ -44,6 +46,7 @@ export function AppProvider({ children }) {
 
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [granCategorias, setGranCategorias] = useState([]);
   const [priceLists, setPriceLists] = useState([]);
   const [branches, setBranches] = useState([]);
   const [orders, setOrders] = useState([]);
@@ -57,6 +60,7 @@ export function AppProvider({ children }) {
     if (!currentUser) {
       setProducts([]);
       setCategories([]);
+      setGranCategorias([]);
       setPriceLists([]);
       setBranches([]);
       setOrders([]);
@@ -68,7 +72,10 @@ export function AppProvider({ children }) {
     setLoadingApp(true);
     const role = currentUser.role;
 
-    const loaders = [categoriesApi.list({ active: true })];
+    const loaders = [
+      categoriesApi.list({ active: true }),
+      granCategoriasApi.list({ active: true }),
+    ];
 
     if (role === "admin") {
       loaders.push(
@@ -108,25 +115,26 @@ export function AppProvider({ children }) {
         results[i]?.status === "fulfilled" ? results[i].value : [];
 
       setCategories(get(0) || []);
+      setGranCategorias(get(1) || []);
 
       if (role === "admin") {
-        setProducts(get(1) || []);
-        setPriceLists(get(2) || []);
-        setBranches(get(3) || []);
-        setOrders(get(4) || []);
-        setCompanies(get(5) || []);
-        setUsers(get(6) || []);
+        setProducts(get(2) || []);
+        setPriceLists(get(3) || []);
+        setBranches(get(4) || []);
+        setOrders(get(5) || []);
+        setCompanies(get(6) || []);
+        setUsers(get(7) || []);
       } else if (role === "advisor") {
-        setProducts(get(1) || []);
-        setOrders(get(2) || []);
-        setCompanies(get(3) || []);
-        setUsers(get(4) || []);
+        setProducts(get(2) || []);
+        setOrders(get(3) || []);
+        setCompanies(get(4) || []);
+        setUsers(get(5) || []);
       } else if (role === "client") {
-        setOrders(get(1) || []);
-        setUsers(get(2) || []);
-        setCompanies(get(3) || []);
+        setOrders(get(2) || []);
+        setUsers(get(3) || []);
+        setCompanies(get(4) || []);
       } else if (role === "delivery") {
-        setOrders(get(1) || []);
+        setOrders(get(2) || []);
       }
       setLoadingApp(false);
     });
@@ -223,6 +231,11 @@ export function AppProvider({ children }) {
     setCategories(res || []);
   }
 
+  async function refreshGranCategorias() {
+    const res = await granCategoriasApi.list();
+    setGranCategorias(res || []);
+  }
+
   async function refreshBranches() {
     const res = await branchesApi.list();
     setBranches(res || []);
@@ -240,6 +253,7 @@ export function AppProvider({ children }) {
 
   const cartTotal = cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
   const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
+  const { subtotal: cartSubtotal, iva: cartIva } = splitIva(cartTotal);
 
   return (
     <AppContext.Provider
@@ -248,6 +262,8 @@ export function AppProvider({ children }) {
         setProducts,
         categories,
         setCategories,
+        granCategorias,
+        setGranCategorias,
         priceLists,
         setPriceLists,
         branches,
@@ -260,6 +276,8 @@ export function AppProvider({ children }) {
         setUsers,
         cart,
         cartTotal,
+        cartSubtotal,
+        cartIva,
         cartCount,
         loadingApp,
         addToCart,
@@ -273,6 +291,7 @@ export function AppProvider({ children }) {
         refreshCompanies,
         refreshUsers,
         refreshCategories,
+        refreshGranCategorias,
         refreshBranches,
         refreshPriceLists,
       }}

@@ -34,7 +34,7 @@ function requireCompanyReader(req, res, next) {
   const { role, clientRole } = req.user;
   if (role === 'admin') return next();
   if (role === 'advisor') return next();
-  if (role === 'client' && (clientRole === 'supervisor' || clientRole === 'admin_empresa')) {
+  if (role === 'client' && (clientRole === 'supervisor' || clientRole === 'admin_empresa' || clientRole === 'administrador_contrato')) {
     return next();
   }
   return res.status(403).json({ error: 'No autorizado para este recurso' });

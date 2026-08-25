@@ -5,8 +5,12 @@ import {
   File, FileText as FilePdf, ImageIcon, Download, User, Calendar, Truck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { ordersApi } from '../../services/api';
-import { STATUS_STYLES, formatCOP } from '../../data/mockData';
+import { STATUS_STYLES, formatCOP, splitIva } from '../../data/mockData';
+
+// Estados en los que el pedido todavia se puede editar (antes de Alistamiento).
+const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente', 'Validar disponibilidad'];
 
 function fileIcon(type = '') {
   if (type.startsWith('image/')) return <ImageIcon className="w-4 h-4 text-blue-500" />;
@@ -41,6 +45,7 @@ export default function ClientOrderDetail() {
   const { orderId } = useParams();
   const navigate    = useNavigate();
   const { users } = useApp();
+  const { currentUser } = useAuth();
 
   // El listado /orders no trae items/comments/attachments. Hacemos fetch del
   // detalle completo aquí (incluye order_items con snapshot productName/sku).
@@ -64,6 +69,111 @@ export default function ClientOrderDetail() {
   const advisor  = order ? users.find(u => u.id === order.advisorId) : null;
   const comments    = order?.comments    || [];
   const attachments = order?.attachments || [];
+
+  // admin_empresa es de solo lectura; el resto de roles cliente pueden
+  // editar mientras el pedido no haya entrado a Alistamiento.
+  const canEdit = order &&
+    currentUser?.clientRole !== 'admin_empresa' &&
+    ITEM_EDITABLE_STATUSES.includes(order.status);
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState([]);
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
+  function startEdit() {
+    setDraft(
+      (order.items || []).map((it) => ({
+        productId: it.productId,
+        productName: it.productName,
+        sku: it.sku,
+        unit: it.unit,
+        unitPrice: Number(it.unitPrice),
+        quantity: Number(it.quantity),
+        removed: false,
+      }))
+    );
+    setReason('');
+    setSaveError(null);
+    setEditing(true);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setSaveError(null);
+  }
+
+  function setQty(productId, qty) {
+    const n = Math.max(1, Math.trunc(Number(qty) || 0));
+    setDraft((prev) => prev.map((it) => (it.productId === productId ? { ...it, quantity: n } : it)));
+  }
+
+  function toggleRemove(productId) {
+    setDraft((prev) => prev.map((it) => (it.productId === productId ? { ...it, removed: !it.removed } : it)));
+  }
+
+  const hasChanges = (() => {
+    const orig = new Map((order?.items || []).map((it) => [it.productId, it]));
+    return draft.some((it) => {
+      const o = orig.get(it.productId);
+      if (!o) return false;
+      if (it.removed) return true;
+      return Number(o.quantity) !== Number(it.quantity);
+    });
+  })();
+
+  const remaining = draft.filter((it) => !it.removed).length;
+  const projectedTotal = draft.reduce((s, it) => (it.removed ? s : s + it.unitPrice * it.quantity), 0);
+  const { subtotal: projectedSubtotal, iva: projectedIva } = splitIva(projectedTotal);
+
+  async function saveEdit() {
+    setSaveError(null);
+    if (!reason.trim()) {
+      setSaveError('Indica el motivo de la modificación.');
+      return;
+    }
+    if (!hasChanges) {
+      setSaveError('No hay cambios para guardar.');
+      return;
+    }
+    if (remaining === 0) {
+      setSaveError('No puedes eliminar todos los productos.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        items: draft.filter((it) => !it.removed).map((it) => ({ productId: it.productId, quantity: it.quantity })),
+        reason: reason.trim(),
+      };
+      const res = await ordersApi.updateItems(order.id, payload);
+      const newItems = draft
+        .filter((it) => !it.removed)
+        .map((it) => ({
+          productId: it.productId,
+          productName: it.productName,
+          sku: it.sku,
+          unit: it.unit,
+          unitPrice: it.unitPrice,
+          quantity: it.quantity,
+        }));
+      const newTotal = res?.total ?? projectedTotal;
+      const fallback = splitIva(newTotal);
+      setOrder((prev) => ({
+        ...prev,
+        items: newItems,
+        total: newTotal,
+        subtotal: res?.subtotal ?? fallback.subtotal,
+        iva: res?.iva ?? fallback.iva,
+      }));
+      setEditing(false);
+    } catch (err) {
+      setSaveError(err?.message || 'No se pudo guardar');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -131,7 +241,9 @@ export default function ClientOrderDetail() {
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-xs text-gray-400 mb-1">Total</p>
+                <p className="text-xs text-gray-400">Subtotal {formatCOP(order.subtotal)}</p>
+                <p className="text-xs text-gray-400 mb-1">IVA (19%) {formatCOP(order.iva)}</p>
+                <p className="text-xs text-gray-400 mb-1">Total Pedido</p>
                 <p className="text-3xl font-bold text-blue-700">{formatCOP(order.total)}</p>
               </div>
             </div>
@@ -142,6 +254,14 @@ export default function ClientOrderDetail() {
             <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
               <Package className="w-4 h-4 text-blue-600" />
               <h3 className="text-sm font-semibold text-gray-800">Productos</h3>
+              {canEdit && !editing && (
+                <button
+                  onClick={startEdit}
+                  className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition"
+                >
+                  Modificar pedido
+                </button>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -152,11 +272,12 @@ export default function ClientOrderDetail() {
                     <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">Unidad</th>
                     <th className="text-center text-xs font-semibold text-gray-500 uppercase px-5 py-3">Cant.</th>
                     <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Precio unit.</th>
-                    <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Subtotal</th>
+                    <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Total línea</th>
+                    {editing && <th className="px-5 py-3"></th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {(order.items || []).map((item, idx) => (
+                  {!editing && (order.items || []).map((item, idx) => (
                     <tr key={idx} className="hover:bg-gray-50 transition-colors">
                       <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{item.sku || '—'}</td>
                       <td className="px-5 py-3 text-sm font-medium text-gray-800">{item.productName}</td>
@@ -166,15 +287,102 @@ export default function ClientOrderDetail() {
                       <td className="px-5 py-3 text-sm font-semibold text-gray-800 text-right">{formatCOP(item.unitPrice * item.quantity)}</td>
                     </tr>
                   ))}
+                  {editing && draft.map((item) => (
+                    <tr key={item.productId} className={item.removed ? 'bg-red-50' : 'hover:bg-gray-50'}>
+                      <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{item.sku || '—'}</td>
+                      <td className={`px-5 py-3 text-sm font-medium ${item.removed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                        {item.productName}
+                      </td>
+                      <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
+                      <td className="px-5 py-3 text-sm text-gray-700 text-center">
+                        <input
+                          type="number"
+                          min={1}
+                          disabled={item.removed}
+                          value={item.quantity}
+                          onChange={(e) => setQty(item.productId, e.target.value)}
+                          className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                        />
+                      </td>
+                      <td className="px-5 py-3 text-sm text-gray-700 text-right">{formatCOP(item.unitPrice)}</td>
+                      <td className={`px-5 py-3 text-sm font-semibold text-right ${item.removed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                        {formatCOP(item.unitPrice * item.quantity)}
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        <button
+                          onClick={() => toggleRemove(item.productId)}
+                          className={`text-xs px-2 py-1 rounded-lg transition ${
+                            item.removed ? 'text-blue-700 hover:bg-blue-50' : 'text-red-600 hover:bg-red-50'
+                          }`}
+                        >
+                          {item.removed ? 'Restaurar' : 'Eliminar'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
                 <tfoot>
+                  <tr className="border-t border-gray-100">
+                    <td colSpan={5} className="px-5 py-1.5 text-sm text-gray-500 text-right">Subtotal</td>
+                    <td className="px-5 py-1.5 text-sm text-gray-700 text-right">
+                      {formatCOP(editing ? projectedSubtotal : order.subtotal)}
+                    </td>
+                    {editing && <td></td>}
+                  </tr>
+                  <tr>
+                    <td colSpan={5} className="px-5 py-1.5 text-sm text-gray-500 text-right">IVA (19%)</td>
+                    <td className="px-5 py-1.5 text-sm text-gray-700 text-right">
+                      {formatCOP(editing ? projectedIva : order.iva)}
+                    </td>
+                    {editing && <td></td>}
+                  </tr>
                   <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={5} className="px-5 py-3 text-sm font-bold text-gray-700 text-right">Total</td>
-                    <td className="px-5 py-3 text-base font-bold text-blue-700 text-right">{formatCOP(order.total)}</td>
+                    <td colSpan={5} className="px-5 py-3 text-sm font-bold text-gray-700 text-right">TOTAL PEDIDO</td>
+                    <td className="px-5 py-3 text-base font-bold text-blue-700 text-right">
+                      {formatCOP(editing ? projectedTotal : order.total)}
+                    </td>
+                    {editing && <td></td>}
                   </tr>
                 </tfoot>
               </table>
             </div>
+
+            {editing && (
+              <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    Motivo de la modificación <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    rows={2}
+                    maxLength={1000}
+                    placeholder="Ej: ajuste de cantidad, producto ya no se necesita..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  />
+                </div>
+                {saveError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-xs">{saveError}</div>
+                )}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={saveEdit}
+                    disabled={saving}
+                    className="px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 disabled:opacity-50 transition"
+                  >
+                    {saving ? 'Guardando...' : 'Guardar cambios'}
+                  </button>
+                  <button
+                    onClick={cancelEdit}
+                    disabled={saving}
+                    className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Client notes */}
@@ -273,7 +481,15 @@ export default function ClientOrderDetail() {
                 <span className="font-medium text-gray-700">{(order.items || []).reduce((s, i) => s + i.quantity, 0)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Total</span>
+                <span className="text-gray-500">Subtotal</span>
+                <span className="font-medium text-gray-700">{formatCOP(order.subtotal)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">IVA (19%)</span>
+                <span className="font-medium text-gray-700">{formatCOP(order.iva)}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t border-gray-100">
+                <span className="text-gray-600 font-medium">Total Pedido</span>
                 <span className="font-semibold text-blue-700">{formatCOP(order.total)}</span>
               </div>
             </div>

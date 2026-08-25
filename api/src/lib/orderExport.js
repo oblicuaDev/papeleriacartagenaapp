@@ -7,6 +7,7 @@
 import ExcelJS from 'exceljs';
 import fs from 'fs';
 import { LOGO_PATH } from './purchaseOrderPdf.js';
+import { splitIva } from './iva.js';
 
 const COMPANY_NAME = 'Papelería Cartagena';
 
@@ -36,15 +37,17 @@ function embedHeaderLogo(wb, ws, { rowSpan = 4 } = {}) {
 }
 
 export const ORDER_EXPORT_COLUMNS = [
-  { header: 'ID',         key: 'id',         width: 14 },
-  { header: 'Estado',     key: 'status',     width: 22 },
-  { header: 'Fecha',      key: 'created_at', width: 12 },
-  { header: 'Empresa',    key: 'company',    width: 30 },
-  { header: 'Sucursal',   key: 'sucursal',   width: 22 },
-  { header: 'Cliente',    key: 'client',     width: 25 },
-  { header: 'Asesor',     key: 'advisor',    width: 25 },
-  { header: 'Items',      key: 'items',      width: 8  },
-  { header: 'Total (COP)',key: 'total',      width: 14 },
+  { header: 'ID',           key: 'id',         width: 14 },
+  { header: 'Estado',       key: 'status',     width: 22 },
+  { header: 'Fecha',        key: 'created_at', width: 12 },
+  { header: 'Empresa',      key: 'company',    width: 30 },
+  { header: 'Sucursal',     key: 'sucursal',   width: 22 },
+  { header: 'Cliente',      key: 'client',     width: 25 },
+  { header: 'Asesor',       key: 'advisor',    width: 25 },
+  { header: 'Items',        key: 'items',      width: 8  },
+  { header: 'Subtotal (COP)', key: 'subtotal', width: 15 },
+  { header: 'IVA (COP)',    key: 'iva',        width: 13 },
+  { header: 'Total (COP)',  key: 'total',      width: 14 },
 ];
 
 function csvField(val) {
@@ -101,8 +104,10 @@ export async function buildXlsx(rows, sheetName = 'Pedidos') {
   headerRow.height = 22;
 
   // Datos
-  const totalIdx = ORDER_EXPORT_COLUMNS.findIndex(c => c.key === 'total') + 1;
-  const itemsIdx = ORDER_EXPORT_COLUMNS.findIndex(c => c.key === 'items') + 1;
+  const totalIdx    = ORDER_EXPORT_COLUMNS.findIndex(c => c.key === 'total') + 1;
+  const subtotalIdx = ORDER_EXPORT_COLUMNS.findIndex(c => c.key === 'subtotal') + 1;
+  const ivaIdx      = ORDER_EXPORT_COLUMNS.findIndex(c => c.key === 'iva') + 1;
+  const itemsIdx    = ORDER_EXPORT_COLUMNS.findIndex(c => c.key === 'items') + 1;
 
   rows.forEach((r, i) => {
     const dataRow = ws.getRow(tableHeaderRow + 1 + i);
@@ -111,6 +116,10 @@ export async function buildXlsx(rows, sheetName = 'Pedidos') {
     });
     dataRow.getCell(totalIdx).numFmt = '"$"#,##0';
     dataRow.getCell(totalIdx).alignment = { horizontal: 'right' };
+    dataRow.getCell(subtotalIdx).numFmt = '"$"#,##0';
+    dataRow.getCell(subtotalIdx).alignment = { horizontal: 'right' };
+    dataRow.getCell(ivaIdx).numFmt = '"$"#,##0';
+    dataRow.getCell(ivaIdx).alignment = { horizontal: 'right' };
     dataRow.getCell(itemsIdx).alignment = { horizontal: 'center' };
   });
 
@@ -178,7 +187,7 @@ export async function buildOrderDetailXlsx({ order, items }) {
   // ── Tabla de items ────────────────────────────────────────
   row += 2;
   const headerRow = row;
-  const headers = ['SKU', 'Producto', 'Cant', 'Unidad', 'P. Unit', 'Subtotal'];
+  const headers = ['SKU', 'Producto', 'Cant', 'Unidad', 'P. Unit', 'Total línea'];
   headers.forEach((h, i) => {
     const cell = ws.getCell(headerRow, i + 1);
     cell.value = h;
@@ -207,14 +216,27 @@ export async function buildOrderDetailXlsx({ order, items }) {
     row++;
   }
 
-  // ── Total ─────────────────────────────────────────────────
-  ws.mergeCells(`A${row}:E${row}`);
-  ws.getCell(`A${row}`).value = 'TOTAL';
-  ws.getCell(`A${row}`).font  = { bold: true };
-  ws.getCell(`A${row}`).alignment = { horizontal: 'right' };
-  ws.getCell(`F${row}`).value = Number(order.total ?? total);
-  ws.getCell(`F${row}`).font  = { bold: true };
-  ws.getCell(`F${row}`).numFmt = '"$"#,##0';
+  // ── Subtotal / IVA / Total ───────────────────────────────────
+  const orderTotal = Number(order.total ?? total);
+  const fallbackSplit = splitIva(orderTotal);
+  const subtotalVal = order.subtotal != null ? Number(order.subtotal) : fallbackSplit.subtotal;
+  const ivaVal = order.iva != null ? Number(order.iva) : fallbackSplit.iva;
+
+  const totalsRows = [
+    ['Subtotal', subtotalVal, false],
+    ['IVA (19%)', ivaVal, false],
+    ['TOTAL PEDIDO', orderTotal, true],
+  ];
+  for (const [label, value, bold] of totalsRows) {
+    ws.mergeCells(`A${row}:E${row}`);
+    ws.getCell(`A${row}`).value = label;
+    ws.getCell(`A${row}`).font  = { bold };
+    ws.getCell(`A${row}`).alignment = { horizontal: 'right' };
+    ws.getCell(`F${row}`).value = value;
+    ws.getCell(`F${row}`).font  = { bold };
+    ws.getCell(`F${row}`).numFmt = '"$"#,##0';
+    row++;
+  }
 
   // ── Anchos ────────────────────────────────────────────────
   ws.getColumn(1).width = 14;

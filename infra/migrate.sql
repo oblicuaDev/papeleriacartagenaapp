@@ -119,6 +119,26 @@ CREATE TABLE IF NOT EXISTS categories (
 );
 
 -- ----------------------------------------------------------
+-- 6b. gran_categorias — Agrupa las categorias (subcategorias) en
+--     Papelería / Aseo / Cafetería según el plan único de cuentas.
+-- ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS gran_categorias (
+    id         SERIAL PRIMARY KEY,
+    name       VARCHAR(100) NOT NULL UNIQUE,
+    active     BOOLEAN      NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE categories
+    ADD COLUMN IF NOT EXISTS gran_categoria_id INTEGER REFERENCES gran_categorias(id) ON DELETE SET NULL;
+
+INSERT INTO gran_categorias (name) VALUES
+    ('Papelería'),
+    ('Aseo'),
+    ('Cafetería')
+ON CONFLICT (name) DO NOTHING;
+
+-- ----------------------------------------------------------
 -- 7. products — Catálogo de productos
 -- ----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS products (
@@ -376,6 +396,86 @@ CREATE INDEX IF NOT EXISTS idx_oic_changed_by ON order_item_changes(changed_by);
 -- products.not_in_catalog (migración 012, misma razón)
 ALTER TABLE products
   ADD COLUMN IF NOT EXISTS not_in_catalog BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- category_relations + companies.annual_budget (migración 010, nunca se
+-- habia fusionado: causaba 500 en GET/PUT /categories/:id/related y en
+-- GET /stats/client para admin_empresa -- descubierto al probar Fase 3/4
+-- de la discriminacion de IVA).
+CREATE TABLE IF NOT EXISTS category_relations (
+    category_id         INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    related_category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    PRIMARY KEY (category_id, related_category_id),
+    CONSTRAINT chk_no_self_relation CHECK (category_id <> related_category_id)
+);
+CREATE INDEX IF NOT EXISTS idx_category_relations_category ON category_relations(category_id);
+
+ALTER TABLE companies
+    ADD COLUMN IF NOT EXISTS annual_budget NUMERIC(14, 2);
+ALTER TABLE companies DROP CONSTRAINT IF EXISTS chk_companies_annual_budget;
+ALTER TABLE companies ADD  CONSTRAINT chk_companies_annual_budget
+    CHECK (annual_budget IS NULL OR annual_budget >= 0);
+
+-- ----------------------------------------------------------
+-- 16. orders.subtotal / orders.iva — Discriminación de IVA (migración 014)
+--     Las listas de precio se cargan con IVA (19%) incluido; total ya
+--     representa ese monto final. subtotal/iva se persisten para no
+--     tener que recalcularlos en cada reporte.
+-- ----------------------------------------------------------
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS subtotal NUMERIC(14, 2);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS iva      NUMERIC(14, 2);
+
+UPDATE orders
+   SET subtotal = ROUND(total / 1.19, 2),
+       iva      = total - ROUND(total / 1.19, 2)
+ WHERE subtotal IS NULL;
+
+ALTER TABLE orders ALTER COLUMN subtotal SET NOT NULL;
+ALTER TABLE orders ALTER COLUMN iva      SET NOT NULL;
+
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_subtotal;
+ALTER TABLE orders ADD  CONSTRAINT chk_subtotal CHECK (subtotal >= 0);
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_iva;
+ALTER TABLE orders ADD  CONSTRAINT chk_iva CHECK (iva >= 0);
+ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_subtotal_iva_sum;
+ALTER TABLE orders ADD  CONSTRAINT chk_subtotal_iva_sum CHECK (subtotal + iva = total);
+
+-- ----------------------------------------------------------
+-- 17. contracts / contract_products — Catálogo restringido por contrato
+--     (migración 015). Un contrato vigente ("activo" y fecha actual
+--     dentro de [date_from, date_to]) restringe el catálogo del cliente
+--     de esa empresa a los SKUs incluidos en el contrato. Si hay varios
+--     contratos vigentes a la vez, se usa la unión de sus SKUs.
+-- ----------------------------------------------------------
+CREATE TABLE IF NOT EXISTS contracts (
+    id         SERIAL PRIMARY KEY,
+    company_id INTEGER        NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    date_from  DATE           NOT NULL,
+    date_to    DATE           NOT NULL,
+    amount     NUMERIC(14,2)  NOT NULL,
+    active     BOOLEAN        NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_contract_dates  CHECK (date_to >= date_from),
+    CONSTRAINT chk_contract_amount CHECK (amount >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_contracts_company ON contracts(company_id);
+
+CREATE TABLE IF NOT EXISTS contract_products (
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    product_id  INTEGER NOT NULL REFERENCES products(id)  ON DELETE CASCADE,
+    PRIMARY KEY (contract_id, product_id)
+);
+
+-- ----------------------------------------------------------
+-- 18. users.client_role — nuevo valor 'administrador_contrato'
+--     (migración 015b). Como supervisor pero a nivel de toda la
+--     empresa (todas las sucursales), no solo lectura como admin_empresa.
+-- ----------------------------------------------------------
+ALTER TABLE users DROP CONSTRAINT IF EXISTS chk_client_role;
+ALTER TABLE users ADD  CONSTRAINT chk_client_role
+    CHECK (
+        (role = 'client' AND client_role IN ('supervisor', 'creador_pedidos', 'admin_empresa', 'administrador_contrato'))
+        OR (role <> 'client' AND client_role IS NULL)
+    );
 
 -- ----------------------------------------------------------
 -- Función auxiliar: generar ID de pedido (ORD-00001)

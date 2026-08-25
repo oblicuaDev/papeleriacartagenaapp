@@ -38,7 +38,7 @@ import {
   ArrowRight,
   FileBadge,
 } from "lucide-react";
-import { STATUS_STYLES, ORDER_STATUSES, formatCOP, statusLabel } from "../data/mockData";
+import { STATUS_STYLES, ORDER_STATUSES, formatCOP, statusLabel, splitIva } from "../data/mockData";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -129,9 +129,13 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
   const [editing, setEditing] = useState(false);
   const [localItems, setLocalItems] = useState(order.items || []);
   const [localTotal, setLocalTotal] = useState(order.total);
+  const [localSubtotal, setLocalSubtotal] = useState(order.subtotal);
+  const [localIva, setLocalIva] = useState(order.iva);
   useEffect(() => {
     setLocalItems(order.items || []);
     setLocalTotal(order.total);
+    setLocalSubtotal(order.subtotal);
+    setLocalIva(order.iva);
   }, [order.id]);
   const [draft, setDraft] = useState(() =>
     (order.items || []).map((it) => ({
@@ -198,6 +202,7 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
     (s, it) => (it.removed ? s : s + it.unitPrice * it.quantity),
     0,
   );
+  const { subtotal: projectedSubtotal, iva: projectedIva } = splitIva(projectedTotal);
 
   async function save() {
     setErrMsg(null);
@@ -233,9 +238,14 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
           quantity: it.quantity,
         }));
       const newTotal = res?.total ?? projectedTotal;
+      const fallbackSplit = splitIva(newTotal);
+      const newSubtotal = res?.subtotal ?? fallbackSplit.subtotal;
+      const newIva = res?.iva ?? fallbackSplit.iva;
       setLocalItems(newItems);
       setLocalTotal(newTotal);
-      onSaved && onSaved({ items: newItems, total: newTotal });
+      setLocalSubtotal(newSubtotal);
+      setLocalIva(newIva);
+      onSaved && onSaved({ items: newItems, total: newTotal, subtotal: newSubtotal, iva: newIva });
       await (refreshComments && refreshComments());
       setEditing(false);
     } catch (err) {
@@ -269,7 +279,7 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
               <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">Unidad</th>
               <th className="text-center text-xs font-semibold text-gray-500 uppercase px-5 py-3">Cant.</th>
               <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Precio unit.</th>
-              <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Subtotal</th>
+              <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Total línea</th>
               {editing && <th className="px-5 py-3"></th>}
             </tr>
           </thead>
@@ -324,9 +334,23 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
             ))}
           </tbody>
           <tfoot>
+            <tr className="border-t border-gray-100">
+              <td colSpan={5} className="px-5 py-1.5 text-sm text-gray-500 text-right">Subtotal</td>
+              <td className="px-5 py-1.5 text-sm text-gray-700 text-right">
+                {formatCOP(editing ? projectedSubtotal : localSubtotal)}
+              </td>
+              {editing && <td></td>}
+            </tr>
+            <tr>
+              <td colSpan={5} className="px-5 py-1.5 text-sm text-gray-500 text-right">IVA (19%)</td>
+              <td className="px-5 py-1.5 text-sm text-gray-700 text-right">
+                {formatCOP(editing ? projectedIva : localIva)}
+              </td>
+              {editing && <td></td>}
+            </tr>
             <tr className="bg-gray-50 border-t-2 border-gray-200">
-              <td colSpan={editing ? 5 : 5} className="px-5 py-3 text-sm font-bold text-gray-700 text-right">
-                Total
+              <td colSpan={5} className="px-5 py-3 text-sm font-bold text-gray-700 text-right">
+                TOTAL PEDIDO
               </td>
               <td className="px-5 py-3 text-base font-bold text-blue-700 text-right">
                 {formatCOP(editing ? projectedTotal : localTotal)}
@@ -763,7 +787,9 @@ export default function OrderDetailCRM({
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-xs text-gray-400 mb-1">Total del pedido</p>
+                <p className="text-xs text-gray-400">Subtotal {formatCOP(order.subtotal)}</p>
+                <p className="text-xs text-gray-400 mb-1">IVA (19%) {formatCOP(order.iva)}</p>
+                <p className="text-xs text-gray-400 mb-1">Total Pedido</p>
                 <p className="text-3xl font-bold text-blue-700">
                   {formatCOP(order.total)}
                 </p>
@@ -945,6 +971,8 @@ export default function OrderDetailCRM({
             onSaved={(updated) => {
               order.items = updated.items;
               order.total = updated.total;
+              order.subtotal = updated.subtotal;
+              order.iva = updated.iva;
               setTimelineRefreshKey((k) => k + 1);
             }}
             refreshComments={async () => {
@@ -1329,7 +1357,19 @@ export default function OrderDetailCRM({
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Total</span>
+                <span className="text-gray-500">Subtotal</span>
+                <span className="font-medium text-gray-700">
+                  {formatCOP(order.subtotal)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">IVA (19%)</span>
+                <span className="font-medium text-gray-700">
+                  {formatCOP(order.iva)}
+                </span>
+              </div>
+              <div className="flex justify-between pt-2 border-t border-gray-100">
+                <span className="text-gray-600 font-medium">Total Pedido</span>
                 <span className="font-semibold text-blue-700">
                   {formatCOP(order.total)}
                 </span>

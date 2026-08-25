@@ -4,6 +4,8 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { priceSqlFragmentChain, resolveOrderRouting } from '../lib/pricing.js';
 import { ensurePurchaseOrderPdf, loadOrderContext, renderPdfBuffer } from '../lib/purchaseOrderPdf.js';
 import { buildOrderDetailXlsx } from '../lib/orderExport.js';
+import { splitIva } from '../lib/iva.js';
+import { resolveActiveContractProductIds } from '../lib/contracts.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -29,6 +31,10 @@ const VALID_TRANSITIONS = {
     'Validar disponibilidad':['Alistamiento'],
   },
   supervisor: {
+    'Pendiente por aprobar': ['Validar disponibilidad', 'Rechazado'],
+  },
+  // administrador_contrato: igual que supervisor, pero a nivel de toda la empresa.
+  administrador_contrato: {
     'Pendiente por aprobar': ['Validar disponibilidad', 'Rechazado'],
   },
   // Rol delivery: solo opera desde Alistamiento en adelante.
@@ -70,8 +76,8 @@ router.get('/', async (req, res) => {
            AND u.sucursal_id = $${params.push(req.user.sucursalId ?? null)}
        )`
     );
-  } else if (role === 'client' && clientRole === 'admin_empresa') {
-    // PHASE 3: admin_empresa ve pedidos de TODAS las sucursales de su empresa
+  } else if (role === 'client' && (clientRole === 'admin_empresa' || clientRole === 'administrador_contrato')) {
+    // PHASE 3: admin_empresa/administrador_contrato ven pedidos de TODAS las sucursales de su empresa
     conditions.push(
       `o.client_id IN (SELECT id FROM users WHERE company_id = $${params.push(companyId)})`
     );
@@ -441,7 +447,8 @@ router.post('/', requireRole('client'), async (req, res) => {
   // aprobado. 'Pendiente' quedo reservado como estado legacy (ver
   // VALID_TRANSITIONS): usarlo aqui dejaba el pedido fuera del alcance del
   // asesor, que solo puede validar disponibilidad de pedidos en ese estado.
-  const initialStatus = clientRole === 'supervisor' ? 'Validar disponibilidad' : 'Pendiente por aprobar';
+  const initialStatus = (clientRole === 'supervisor' || clientRole === 'administrador_contrato')
+    ? 'Validar disponibilidad' : 'Pendiente por aprobar';
 
   const client = await pool.connect();
   try {
@@ -458,12 +465,21 @@ router.post('/', requireRole('client'), async (req, res) => {
       listIdParams,
     });
 
+    // Contrato vigente de la empresa del cliente -> restringe que SKUs se pueden pedir
+    const contractProductIds = await resolveActiveContractProductIds(companyId, client);
+
     // Calcular total y armar snapshot frozen con precio BACKEND (con fallback chain)
     let total = 0;
     const itemsToInsert = [];
     const priceMismatches = [];
 
     for (const [idx, item] of items.entries()) {
+      if (contractProductIds && !contractProductIds.has(item.productId)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: `items[${idx}]: producto fuera del catalogo del contrato vigente (id=${item.productId})`,
+        });
+      }
       const { rows: productRows } = await client.query(
         `SELECT p.id, p.name, p.sku, p.unit, p.active,
                 ${priceSelect} AS backend_price
@@ -522,13 +538,16 @@ router.post('/', requireRole('client'), async (req, res) => {
     const { rows: idRows } = await client.query(`SELECT fn_generate_order_id() AS id`);
     const newId = idRows[0].id;
 
+    // Discriminacion de IVA (listas de precio se cargan con IVA incluido)
+    const { subtotal, iva } = splitIva(total);
+
     // Crear pedido. Pre-asignamos asesor segun routing (sucursal > company).
     // TODO: pre-asignar repartidor automaticamente cuando se implementen
     // las reglas de asignacion (round-robin, branches.delivery_id, carga, etc).
     await client.query(
-      `INSERT INTO orders (id, client_id, advisor_id, status, notes, total)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [newId, clientId, orderAdvisorId, initialStatus, notes || null, total]
+      `INSERT INTO orders (id, client_id, advisor_id, status, notes, total, subtotal, iva)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [newId, clientId, orderAdvisorId, initialStatus, notes || null, total, subtotal, iva]
     );
 
     // Insertar items (snapshot frozen)
@@ -563,6 +582,8 @@ router.post('/', requireRole('client'), async (req, res) => {
       id:          newId,
       status:      initialStatus,
       total,
+      subtotal,
+      iva,
       priceListId: orderPriceListId,
       advisorId:   orderAdvisorId,
       createdAt:   new Date().toISOString(),
@@ -640,6 +661,14 @@ router.put('/:id', async (req, res) => {
           return res.status(403).json({ error: 'Pedido pertenece a otra sucursal' });
         }
         allowedTransitions = VALID_TRANSITIONS.supervisor[order.status] || [];
+      } else if (role === 'client' && clientRole === 'administrador_contrato') {
+        // Igual que supervisor pero sin restriccion de sucursal: ve/aprueba
+        // pedidos de toda la empresa.
+        if (order.client_company_id !== companyId) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'No autorizado para aprobar pedidos de otra empresa' });
+        }
+        allowedTransitions = VALID_TRANSITIONS.administrador_contrato[order.status] || [];
       } else if (role === 'delivery') {
         // PHASE 5: delivery solo opera transiciones de transporte y solo en sus pedidos
         if (order.delivery_id !== myId) {
@@ -798,19 +827,22 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// Estados en los que un pedido todavia se puede editar (antes de Alistamiento).
+const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente', 'Validar disponibilidad'];
+
 // PUT /orders/:id/items
-// Modificacion de items por el asesor durante 'Validar disponibilidad'.
+// Modificacion de items mientras el pedido no ha entrado a Alistamiento.
 // Permite cambiar cantidades o eliminar items (no agregar productos nuevos).
+// Autorizado para: admin/asesor (sin restriccion de scope, ademas del check
+// de asesor asignado mas abajo), el gestor del pedido (solo el suyo),
+// supervisor (su sucursal) y administrador_contrato (toda su empresa).
 // Cada modificacion exige un comentario y queda en order_item_changes +
 // order_comments. Recalcula total y regenera el PDF de orden de compra.
 router.put('/:id/items', async (req, res) => {
-  const { role, id: myId } = req.user;
+  const { role, id: myId, clientRole, companyId, sucursalId } = req.user;
   const orderId = req.params.id.toUpperCase();
   const { items, reason } = req.body;
 
-  if (role !== 'admin' && role !== 'advisor') {
-    return res.status(403).json({ error: 'Solo admin o asesor pueden modificar items' });
-  }
   if (!Array.isArray(items)) {
     return res.status(422).json({ error: 'items debe ser un array' });
   }
@@ -852,12 +884,35 @@ router.put('/:id/items', async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Pedido no encontrado' });
     }
-    if (order.status !== 'Validar disponibilidad') {
+    if (!ITEM_EDITABLE_STATUSES.includes(order.status)) {
       await client.query('ROLLBACK');
       return res.status(409).json({
-        error: 'Solo se pueden modificar items mientras el pedido esta en Validar disponibilidad',
+        error: 'Solo se pueden modificar items antes de que el pedido entre a Alistamiento',
       });
     }
+
+    // Autorizacion por scope segun rol/clientRole
+    let authorized = false;
+    if (role === 'admin' || role === 'advisor') {
+      authorized = true;
+    } else if (role === 'client' && clientRole === 'creador_pedidos') {
+      authorized = order.client_id === myId;
+    } else if (role === 'client' && clientRole === 'supervisor') {
+      const { rows: cu } = await client.query(
+        `SELECT company_id, sucursal_id FROM users WHERE id = $1`, [order.client_id]
+      );
+      authorized = cu[0]?.company_id === companyId && cu[0]?.sucursal_id === sucursalId;
+    } else if (role === 'client' && clientRole === 'administrador_contrato') {
+      const { rows: cu } = await client.query(
+        `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
+      );
+      authorized = cu[0]?.company_id === companyId;
+    }
+    if (!authorized) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'No tiene permiso para modificar items de este pedido' });
+    }
+
     if (role === 'advisor' && order.advisor_id && order.advisor_id !== myId) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Pedido asignado a otro asesor' });
@@ -959,10 +1014,11 @@ router.put('/:id/items', async (req, res) => {
       );
     }
 
-    // Recalcular total
+    // Recalcular total + discriminacion de IVA
+    const { subtotal: newSubtotal, iva: newIva } = splitIva(newTotal);
     await client.query(
-      `UPDATE orders SET total = $1 WHERE id = $2`,
-      [newTotal, orderId]
+      `UPDATE orders SET total = $1, subtotal = $2, iva = $3 WHERE id = $4`,
+      [newTotal, newSubtotal, newIva, orderId]
     );
 
     // Comentario sistema con el motivo (queda en timeline)
@@ -991,6 +1047,8 @@ router.put('/:id/items', async (req, res) => {
     return res.json({
       orderId,
       total: newTotal,
+      subtotal: newSubtotal,
+      iva: newIva,
       changes,
       ...(warnings ? { warnings } : {}),
     });

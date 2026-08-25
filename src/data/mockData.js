@@ -278,3 +278,15 @@ export function getPrice(basePrice, priceListId, priceLists) {
 export function formatCOP(amount) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(amount);
 }
+
+// Discrimina IVA (19%) de un monto que ya lo incluye. Solo para preview
+// client-side antes de que el pedido exista en backend (carrito) — una
+// vez el pedido esta creado, usar siempre order.subtotal/order.iva
+// persistidos, nunca recalcular para evitar divergencia con lo cobrado.
+export const IVA_RATE = 0.19;
+
+export function splitIva(total) {
+  const subtotal = Math.round((Number(total) / (1 + IVA_RATE)) * 100) / 100;
+  const iva = Math.round((Number(total) - subtotal) * 100) / 100;
+  return { subtotal, iva };
+}

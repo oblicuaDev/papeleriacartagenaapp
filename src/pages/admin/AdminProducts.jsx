@@ -132,8 +132,9 @@ function Modal({ title, onClose, children }) {
 }
 
 export default function AdminProducts() {
-  const { products, setProducts, categories } = useApp();
+  const { products, setProducts, categories, granCategorias } = useApp();
   const [search, setSearch] = useState("");
+  const [filterGranCategoria, setFilterGranCategoria] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterActive, setFilterActive] = useState(""); // "", "true", "false"
   const [page, setPage] = useState(1);
@@ -346,6 +347,7 @@ export default function AdminProducts() {
       const params = { limit: PAGE_SIZE, page };
       if (search.trim()) params.search = search;
       if (filterCategory) params.categoryId = filterCategory;
+      if (filterGranCategoria) params.granCategoriaId = filterGranCategoria;
       if (filterActive !== "") params.active = filterActive;
 
       const response = await productsApi.list(params);
@@ -354,12 +356,21 @@ export default function AdminProducts() {
     } catch (err) {
       console.error("Error al buscar en la API:", err);
     }
-  }, [search, filterCategory, filterActive, page, setProducts, PAGE_SIZE]);
+  }, [search, filterGranCategoria, filterCategory, filterActive, page, setProducts, PAGE_SIZE]);
 
   // Al cambiar filtros vuelve a página 1
   useEffect(() => {
     setPage(1);
-  }, [search, filterCategory, filterActive]);
+  }, [search, filterGranCategoria, filterCategory, filterActive]);
+
+  // Si la subcategoría elegida deja de pertenecer a la categoría seleccionada, se limpia.
+  function handleFilterGranCategoria(value) {
+    setFilterGranCategoria(value);
+    const cat = categories.find((c) => String(c.id) === String(filterCategory));
+    if (cat && value && String(cat.granCategoriaId) !== String(value)) {
+      setFilterCategory("");
+    }
+  }
 
   // Debounce la carga para no saturar la API
   useEffect(() => {
@@ -414,16 +425,37 @@ export default function AdminProducts() {
         <div className="relative">
           <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
           <select
+            value={filterGranCategoria}
+            onChange={(e) => handleFilterGranCategoria(e.target.value)}
+            className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none"
+          >
+            <option value="">Todas las categorías</option>
+            {granCategorias.map((gc) => (
+              <option key={gc.id} value={gc.id}>
+                {gc.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="relative">
+          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <select
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
             className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white appearance-none"
           >
-            <option value="">Todas las categorías</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
+            <option value="">Todas las subcategorías</option>
+            {categories
+              .filter(
+                (c) =>
+                  !filterGranCategoria ||
+                  String(c.granCategoriaId) === String(filterGranCategoria),
+              )
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
           </select>
         </div>
         <div className="relative">

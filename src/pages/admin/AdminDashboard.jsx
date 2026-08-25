@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Package, Users, ShoppingCart, ClipboardList, CheckCircle, Box, CalendarDays, X } from 'lucide-react';
+import { Package, Users, ShoppingCart, ClipboardList, CheckCircle, Box, CalendarDays, X, Wallet, Receipt, DollarSign } from 'lucide-react';
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import { useApp } from '../../context/AppContext';
 import { statsApi } from '../../services/api';
@@ -9,12 +9,20 @@ import { STATUS_STYLES, formatCOP } from '../../data/mockData';
 
 const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
+// Colores consistentes para las 3 curvas de Subtotal/IVA/Total en todos los dashboards.
+const SERIES_COLORS = { subtotal: '#10b981', iva: '#f59e0b', total: '#2563eb' };
+
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-3">
+    <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-3 space-y-1">
       <p className="text-xs font-semibold text-gray-500 mb-1">{label}</p>
-      <p className="text-base font-bold text-blue-700">{formatCOP(payload[0].value)}</p>
+      {payload.map(p => (
+        <p key={p.dataKey} className="text-sm font-semibold flex items-center gap-2" style={{ color: p.color }}>
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
+          {p.name}: {formatCOP(p.value)}
+        </p>
+      ))}
     </div>
   );
 }
@@ -91,12 +99,16 @@ export default function AdminDashboard() {
     .slice(0, 5);
 
   const monthlyMap = {};
-  MONTHS.forEach((_, i) => { monthlyMap[i] = 0; });
+  MONTHS.forEach((_, i) => { monthlyMap[i] = { subtotal: 0, iva: 0, total: 0 }; });
   filtered.forEach(o => {
     const month = new Date(o.createdAt || o.created_at).getMonth();
-    if (!isNaN(month)) monthlyMap[month] = (monthlyMap[month] || 0) + (o.total || 0);
+    if (!isNaN(month)) {
+      monthlyMap[month].subtotal += o.subtotal || 0;
+      monthlyMap[month].iva      += o.iva || 0;
+      monthlyMap[month].total    += o.total || 0;
+    }
   });
-  const chartData = MONTHS.map((name, i) => ({ name, total: monthlyMap[i] }));
+  const chartData = MONTHS.map((name, i) => ({ name, ...monthlyMap[i] }));
 
   function getClientName(order) {
     return order.clientName || 'Desconocido';
@@ -175,6 +187,13 @@ export default function AdminDashboard() {
         <StatCard label="Total Pedidos"      value={filtered.length}  icon={ClipboardList} color="bg-purple-500" />
       </div>
 
+      {/* Subtotal / IVA / Total del periodo seleccionado */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard label="Subtotal Pedidos" value={formatCOP(stats?.totalSubtotal ?? 0)} icon={Wallet}     color="bg-emerald-500" />
+        <StatCard label="IVA Pedidos (19%)" value={formatCOP(stats?.totalIva ?? 0)}     icon={Receipt}    color="bg-amber-500"   />
+        <StatCard label="Total Pedidos ($)" value={formatCOP(stats?.totalRevenue ?? 0)} icon={DollarSign} color="bg-blue-600"    />
+      </div>
+
       {/* Top products + Recent orders */}
       <div className="flex gap-4 items-start">
 
@@ -216,14 +235,16 @@ export default function AdminDashboard() {
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-3">Pedido</th>
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-3">Cliente</th>
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-3">Fecha</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-3">Total</th>
+                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-3">Subtotal</th>
+                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-3">IVA</th>
+                  <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-3">Total</th>
                   <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-6 py-3">Estado</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {recentOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-10 text-center text-sm text-gray-400">
+                    <td colSpan={7} className="px-6 py-10 text-center text-sm text-gray-400">
                       No hay pedidos en el periodo seleccionado
                     </td>
                   </tr>
@@ -234,7 +255,9 @@ export default function AdminDashboard() {
                       <td className="px-6 py-4 text-sm font-mono font-medium text-blue-700">{order.id}</td>
                       <td className="px-6 py-4 text-sm text-gray-700">{getClientName(order)}</td>
                       <td className="px-6 py-4 text-sm text-gray-500">{(order.createdAt || '').slice(0, 10)}</td>
-                      <td className="px-6 py-4 text-sm font-medium text-gray-800">{formatCOP(order.total)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600 text-right">{formatCOP(order.subtotal)}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600 text-right">{formatCOP(order.iva)}</td>
+                      <td className="px-6 py-4 text-sm font-medium text-gray-800 text-right">{formatCOP(order.total)}</td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>
                           {order.status}
@@ -256,22 +279,30 @@ export default function AdminDashboard() {
           <h3 className="text-base font-semibold text-gray-800">Histórico de Consumos</h3>
           <p className="text-xs text-gray-400 mt-0.5">Monto total de pedidos por mes{isFiltered ? ' · filtrado por periodo' : ''}</p>
         </div>
-        <ResponsiveContainer width="100%" height={260}>
+        <ResponsiveContainer width="100%" height={280}>
           <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
             <defs>
+              <linearGradient id="colorSubtotal" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={SERIES_COLORS.subtotal} stopOpacity={0.15} />
+                <stop offset="95%" stopColor={SERIES_COLORS.subtotal} stopOpacity={0}    />
+              </linearGradient>
+              <linearGradient id="colorIva" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={SERIES_COLORS.iva} stopOpacity={0.15} />
+                <stop offset="95%" stopColor={SERIES_COLORS.iva} stopOpacity={0}    />
+              </linearGradient>
               <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.15} />
-                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}    />
+                <stop offset="5%"  stopColor={SERIES_COLORS.total} stopOpacity={0.15} />
+                <stop offset="95%" stopColor={SERIES_COLORS.total} stopOpacity={0}    />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
             <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#9ca3af', fontFamily: 'Montserrat' }} axisLine={false} tickLine={false} />
             <YAxis tickFormatter={v => v === 0 ? '0' : `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: '#9ca3af', fontFamily: 'Montserrat' }} axisLine={false} tickLine={false} width={52} />
             <Tooltip content={<CustomTooltip />} />
-            <Area type="monotone" dataKey="total" stroke="#3b82f6" strokeWidth={2.5} fill="url(#colorTotal)"
-              dot={{ r: 4, fill: '#3b82f6', strokeWidth: 0 }}
-              activeDot={{ r: 6, fill: '#1d4ed8', strokeWidth: 0 }}
-            />
+            <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'Montserrat' }} />
+            <Area type="monotone" name="Subtotal" dataKey="subtotal" stroke={SERIES_COLORS.subtotal} strokeWidth={2} fill="url(#colorSubtotal)" dot={false} activeDot={{ r: 5 }} />
+            <Area type="monotone" name="IVA (19%)" dataKey="iva" stroke={SERIES_COLORS.iva} strokeWidth={2} fill="url(#colorIva)" dot={false} activeDot={{ r: 5 }} />
+            <Area type="monotone" name="Total" dataKey="total" stroke={SERIES_COLORS.total} strokeWidth={2.5} fill="url(#colorTotal)" dot={false} activeDot={{ r: 6 }} />
           </AreaChart>
         </ResponsiveContainer>
       </div>

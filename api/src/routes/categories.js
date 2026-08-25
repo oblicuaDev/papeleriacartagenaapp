@@ -32,7 +32,7 @@ router.post('/', requireRole('admin'), async (req, res) => {
     );
     return res.status(201).json(rows[0]);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe una categoría con ese nombre' });
+    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe una subcategoría con ese nombre' });
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
@@ -54,10 +54,10 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     const { rows } = await pool.query(
       `UPDATE categories SET ${fields.join(', ')} WHERE id = $${params.length} RETURNING *`, params
     );
-    if (!rows[0]) return res.status(404).json({ error: 'Categoría no encontrada' });
+    if (!rows[0]) return res.status(404).json({ error: 'Subcategoría no encontrada' });
     return res.json(rows[0]);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe una categoría con ese nombre' });
+    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe una subcategoría con ese nombre' });
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
@@ -128,18 +128,18 @@ router.delete('/:id', requireRole('admin'), async (req, res) => {
     );
     if (rows.length) {
       return res.status(409).json({
-        error: 'La categoría tiene productos asociados. Reasigna o elimina los productos antes.',
+        error: 'La subcategoría tiene productos asociados. Reasigna o elimina los productos antes.',
       });
     }
 
     const result = await pool.query(`DELETE FROM categories WHERE id = $1`, [id]);
     if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Categoría no encontrada' });
+      return res.status(404).json({ error: 'Subcategoría no encontrada' });
     }
-    return res.json({ message: 'Categoría eliminada definitivamente' });
+    return res.json({ message: 'Subcategoría eliminada definitivamente' });
   } catch (err) {
     if (err.code === '23503') {
-      return res.status(409).json({ error: 'La categoría tiene productos vinculados' });
+      return res.status(409).json({ error: 'La subcategoría tiene productos vinculados' });
     }
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });

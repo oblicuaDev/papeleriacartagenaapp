@@ -33,7 +33,7 @@ async function resolveChainForRequest(req) {
 
 // GET /products
 router.get('/', async (req, res) => {
-  const { categoryId, active, search, page = 1, limit = 20 } = req.query;
+  const { categoryId, granCategoriaId, active, search, page = 1, limit = 20 } = req.query;
   const pageNum = Math.max(1, parseInt(page));
   const limitNum = Math.min(1000, Math.max(1, parseInt(limit)));
   const offset = (pageNum - 1) * limitNum;
@@ -45,6 +45,7 @@ router.get('/', async (req, res) => {
 
   if (active !== undefined) conditions.push(`p.active = $${condParams.push(active === 'true')}`);
   if (categoryId) conditions.push(`p.category_id = $${condParams.push(parseInt(categoryId))}`);
+  if (granCategoriaId) conditions.push(`c.gran_categoria_id = $${condParams.push(parseInt(granCategoriaId))}`);
   if (search) {
     const s = '%' + search + '%';
     conditions.push(
@@ -93,7 +94,7 @@ router.get('/', async (req, res) => {
     );
 
     const { rows: countRows } = await pool.query(
-      `SELECT COUNT(*) FROM products p ${where}`, condParams
+      `SELECT COUNT(*) FROM products p JOIN categories c ON c.id = p.category_id ${where}`, condParams
     );
 
     return res.json({

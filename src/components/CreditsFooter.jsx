@@ -1,42 +1,42 @@
+import { useEffect, useRef } from 'react';
+
+const CREDITS_SCRIPT_URL = 'https://lab.oblicua.co/credits/credits.js';
+const CREDITS_COLOR = '#1d4ed8';
+const CREDITS_REFERENCE = 'PapeleriaCartagena';
+
+function insertCredits(container) {
+  if (!container || typeof window.setCredits !== 'function') return;
+  window.setCredits(CREDITS_COLOR, CREDITS_REFERENCE);
+  const inserted = document.body.lastElementChild;
+  if (inserted?.classList.contains('bhrcredits')) {
+    container.appendChild(inserted);
+  }
+}
+
 export default function CreditsFooter() {
-  return (
-    <div
-      className="bhrcredits"
-      style={{
-        textAlign: 'right',
-        background: '#1d4ed8',
-        padding: '10px 0',
-        width: '100%',
-        gridColumn: '1 / -1',
-      }}
-    >
-      <div
-        style={{
-          maxWidth: '1200px',
-          margin: '0 auto',
-          color: '#FFF',
-          fontSize: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          padding: '2px 20px',
-          justifyContent: 'flex-end',
-        }}
-      >
-        Creado junto a{' '}
-        <a
-          href="https://www.web.oblicua.co/?ref=PapeleriaCartagena"
-          style={{ color: '#428bca' }}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img
-            src="https://lab.oblicua.co/credits/logo.svg"
-            width="60"
-            style={{ marginLeft: '10px' }}
-            alt="Sitio diseñado por Oblicua"
-          />
-        </a>
-      </div>
-    </div>
-  );
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = () => {
+      if (!cancelled) insertCredits(containerRef.current);
+    };
+
+    if (typeof window.setCredits === 'function') {
+      run();
+    } else {
+      const script = document.createElement('script');
+      script.src = CREDITS_SCRIPT_URL;
+      script.async = true;
+      script.onload = run;
+      document.body.appendChild(script);
+    }
+
+    return () => {
+      cancelled = true;
+      containerRef.current?.replaceChildren();
+    };
+  }, []);
+
+  return <div ref={containerRef} />;
 }

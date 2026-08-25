@@ -13,6 +13,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import pool from '../config/db.js';
 import { uploadBuffer } from './storage.js';
+import { splitIva } from './iva.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -195,13 +196,29 @@ export function renderPdfBuffer({ order, items }) {
       y += 14 * lineCount;
     }
 
-    // ── Total ───────────────────────────────────────────────
+    // ── Subtotal / IVA / Total ─────────────────────────────
+    const orderTotal = order.total ?? computedTotal;
+    const { subtotal: fallbackSubtotal, iva: fallbackIva } = splitIva(orderTotal);
+    const subtotalVal = order.subtotal ?? fallbackSubtotal;
+    const ivaVal = order.iva ?? fallbackIva;
+
     y += 8;
     doc.moveTo(360, y).lineTo(562, y).strokeColor('#000000').stroke();
     y += 6;
+
+    doc.font('Helvetica').fontSize(10);
+    doc.text('Subtotal', 360, y, { width: 100, align: 'right' });
+    doc.text(formatCOP(subtotalVal), colX.total, y, { width: colW.total, align: 'right' });
+    y += 14;
+    doc.text('IVA (19%)', 360, y, { width: 100, align: 'right' });
+    doc.text(formatCOP(ivaVal), colX.total, y, { width: colW.total, align: 'right' });
+    y += 16;
+
+    doc.moveTo(360, y).lineTo(562, y).strokeColor('#000000').stroke();
+    y += 6;
     doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('TOTAL', 360, y, { width: 100, align: 'right' });
-    doc.text(formatCOP(order.total ?? computedTotal), colX.total, y, { width: colW.total, align: 'right' });
+    doc.text('TOTAL PEDIDO', 360, y, { width: 100, align: 'right' });
+    doc.text(formatCOP(orderTotal), colX.total, y, { width: colW.total, align: 'right' });
     y += 20;
 
     // ── Notas ───────────────────────────────────────────────

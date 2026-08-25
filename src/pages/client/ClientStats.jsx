@@ -1,29 +1,40 @@
-import { useEffect, useState } from 'react';
-import { BarChart3, TrendingUp, Package, Users, Calendar, AlertCircle, Download, Filter, Wallet } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  BarChart3, TrendingUp, Package, Users, Calendar, AlertCircle, Download,
+  Filter, Wallet, Receipt, DollarSign, CalendarDays, X, UserCircle,
+} from 'lucide-react';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
 import { statsApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { formatCOP, STATUS_STYLES, statusLabel } from '../../data/mockData';
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
+// Colores consistentes para las 3 curvas de Subtotal/IVA/Total en todos los dashboards.
+const SERIES_COLORS = { subtotal: '#10b981', iva: '#f59e0b', total: '#2563eb' };
 
-async function downloadStatsExport({ format = 'xlsx', sucursalId } = {}) {
-  const token = localStorage.getItem('pc_token');
-  const url = new URL(`${API_BASE}/stats/orders/export`, window.location.origin);
-  url.searchParams.set('format', format);
-  if (sucursalId) url.searchParams.set('sucursalId', sucursalId);
-  const res = await fetch(url.toString().replace(window.location.origin, ''), {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`Export fallo: HTTP ${res.status}`);
-  const blob = await res.blob();
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `estadisticas_${new Date().toISOString().slice(0, 10)}.${format}`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(a.href);
+const inputCls = 'border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white';
+
+function sixMonthsAgoISO() {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 6);
+  return d.toISOString().slice(0, 10);
+}
+
+function ChartTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-3 space-y-1">
+      <p className="text-xs font-semibold text-gray-500 mb-1">{label}</p>
+      {payload.map(p => (
+        <p key={p.dataKey} className="text-sm font-semibold flex items-center gap-2" style={{ color: p.color }}>
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
+          {p.name}: {formatCOP(p.value)}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 function StatCard({ icon: Icon, label, value, accent = 'blue' }) {
@@ -48,32 +59,92 @@ function StatCard({ icon: Icon, label, value, accent = 'blue' }) {
 
 export default function ClientStats() {
   const { currentUser } = useAuth();
-  const { companies } = useApp();
+  const { companies, users, categories, granCategorias } = useApp();
   const [stats, setStats]     = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
   const [sucursalFilter, setSucursalFilter] = useState('');
+  const [userFilter, setUserFilter] = useState('');
+  const [granCategoriaFilter, setGranCategoriaFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState(sixMonthsAgoISO());
+  const [dateTo, setDateTo]     = useState('');
   const [exporting, setExporting] = useState(false);
 
-  const isAdminEmpresa = currentUser?.clientRole === 'admin_empresa';
-  const company = isAdminEmpresa ? companies.find(c => c.id === currentUser?.companyId) : null;
+  const isAdminEmpresa  = currentUser?.clientRole === 'admin_empresa';
+  const isSupervisor    = currentUser?.clientRole === 'supervisor';
+  const isAdminContrato = currentUser?.clientRole === 'administrador_contrato';
+  // Filtros de usuario-gestor y linea de producto solo tienen sentido en
+  // vistas agregadas (varios usuarios/pedidos), no para creador_pedidos.
+  const canFilterAdvanced = isAdminEmpresa || isSupervisor || isAdminContrato;
+  // administrador_contrato ve toda la empresa igual que admin_empresa (con filtro de sede opcional).
+  const isCompanyWideView = isAdminEmpresa || isAdminContrato;
+  const company = isCompanyWideView ? companies.find(c => c.id === currentUser?.companyId) : null;
   const sucursales = company?.sucursales || [];
+
+  // Usuarios "gestores" que pueden filtrarse: clientes de la misma empresa,
+  // acotados a la sucursal del supervisor (o a la sede elegida por admin_empresa/administrador_contrato).
+  const managerUsers = useMemo(() => {
+    return (users || []).filter(u => {
+      if (u.role !== 'client') return false;
+      if (isSupervisor) return u.sucursalId === currentUser?.sucursalId;
+      if (isCompanyWideView && sucursalFilter) return u.sucursalId === Number(sucursalFilter);
+      return true;
+    });
+  }, [users, isSupervisor, isCompanyWideView, sucursalFilter, currentUser?.sucursalId]);
+
+  const isDateFiltered = dateFrom !== sixMonthsAgoISO() || dateTo;
+  const isFiltered = isDateFiltered || sucursalFilter || userFilter || granCategoriaFilter || categoryFilter;
+
+  function buildParams() {
+    const params = {};
+    if (dateFrom) params.dateFrom = dateFrom;
+    if (dateTo)   params.dateTo   = dateTo;
+    if (sucursalFilter) params.sucursalId = sucursalFilter;
+    if (userFilter)     params.userId = userFilter;
+    if (categoryFilter) params.categoryId = categoryFilter;
+    else if (granCategoriaFilter) params.granCategoriaId = granCategoriaFilter;
+    return params;
+  }
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const params = sucursalFilter ? { sucursalId: sucursalFilter } : {};
-    statsApi.client(params)
+    statsApi.client(buildParams())
       .then(s => { if (!cancelled) setStats(s); })
       .catch(err => { if (!cancelled) setError(err?.message || 'Error cargando estadisticas'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [sucursalFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo, sucursalFilter, userFilter, categoryFilter, granCategoriaFilter]);
+
+  function clearFilters() {
+    setDateFrom(sixMonthsAgoISO());
+    setDateTo('');
+    setSucursalFilter('');
+    setUserFilter('');
+    setGranCategoriaFilter('');
+    setCategoryFilter('');
+  }
+
+  function handleSelectGranCategoria(id) {
+    setGranCategoriaFilter(id);
+    if (categoryFilter && categories.find(c => c.id === Number(categoryFilter))?.granCategoriaId !== Number(id)) {
+      setCategoryFilter('');
+    }
+  }
 
   async function handleExportExcel() {
     setExporting(true);
     try {
-      await downloadStatsExport({ format: 'xlsx', sucursalId: sucursalFilter });
+      const blob = await statsApi.exportOrders({ ...buildParams(), format: 'xlsx' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `estadisticas_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
     } catch (err) {
       alert(err?.message || 'No se pudo exportar');
     } finally {
@@ -122,45 +193,114 @@ export default function ClientStats() {
           </div>
         </div>
 
-        {/* Filtro sede + export Excel — solo admin_empresa */}
-        {isAdminEmpresa && (
-          <div className="flex items-center gap-2 flex-wrap">
-            {sucursales.length > 0 && (
-              <div className="relative">
-                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
-                <select
-                  value={sucursalFilter}
-                  onChange={e => setSucursalFilter(e.target.value)}
-                  className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[200px]"
-                >
-                  <option value="">Todas las sedes</option>
-                  {sucursales.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}{s.city ? ` — ${s.city}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <button
-              onClick={handleExportExcel}
-              disabled={exporting}
-              className="flex items-center gap-1.5 px-4 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-sm text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition font-medium"
-              title="Exportar a Excel"
-            >
-              <Download className="w-4 h-4" />
-              {exporting ? 'Generando...' : 'Exportar Excel'}
-            </button>
+        {/* Filtro de fecha — todos los roles */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 shadow-sm">
+            <CalendarDays className="w-4 h-4 text-gray-400 flex-shrink-0" />
+            <span className="text-xs font-medium text-gray-500">Desde</span>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className={inputCls} />
+            <span className="text-xs font-medium text-gray-500">Hasta</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className={inputCls} />
           </div>
-        )}
+          {isFiltered && (
+            <button
+              onClick={clearFilters}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 border border-gray-200 rounded-xl transition"
+            >
+              <X className="w-4 h-4" />
+              Limpiar
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Filtros avanzados (usuario gestor, linea de producto, sede) — solo vistas agregadas */}
+      {canFilterAdvanced && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+            <select
+              value={userFilter}
+              onChange={e => setUserFilter(e.target.value)}
+              className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[200px]"
+              title="Usuario gestor"
+            >
+              <option value="">Todos los usuarios</option>
+              {managerUsers.map(u => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+            <select
+              value={granCategoriaFilter}
+              onChange={e => handleSelectGranCategoria(e.target.value)}
+              className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[190px]"
+              title="Linea de producto (grande)"
+            >
+              <option value="">Todas las lineas</option>
+              {granCategorias.filter(g => g.active).map(gc => (
+                <option key={gc.id} value={gc.id}>{gc.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+            <select
+              value={categoryFilter}
+              onChange={e => setCategoryFilter(e.target.value)}
+              className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[200px]"
+              title="Linea de producto (pequeña)"
+            >
+              <option value="">Todas las sublineas</option>
+              {categories
+                .filter(c => c.active && (!granCategoriaFilter || c.granCategoriaId === Number(granCategoriaFilter)))
+                .map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
+            </select>
+          </div>
+
+          {isCompanyWideView && sucursales.length > 0 && (
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+              <select
+                value={sucursalFilter}
+                onChange={e => setSucursalFilter(e.target.value)}
+                className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[200px]"
+                title="Sede"
+              >
+                <option value="">General (todas las sedes)</option>
+                {sucursales.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}{s.city ? ` — ${s.city}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <button
+            onClick={handleExportExcel}
+            disabled={exporting}
+            className="flex items-center gap-1.5 px-4 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-sm text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition font-medium ml-auto"
+            title="Exportar a Excel"
+          >
+            <Download className="w-4 h-4" />
+            {exporting ? 'Generando...' : 'Exportar Excel'}
+          </button>
+        </div>
+      )}
 
       {/* KPI cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Package}    label="Pedidos totales"  value={stats.totalOrders}      accent="blue" />
-        <StatCard icon={Calendar}   label="Pedidos este mes" value={stats.ordersThisMonth}  accent="amber" />
-        <StatCard icon={TrendingUp} label="Gasto total"      value={formatCOP(stats.totalSpent)}    accent="emerald" />
-        <StatCard icon={TrendingUp} label="Gasto este mes"   value={formatCOP(stats.spentThisMonth)} accent="emerald" />
+        <StatCard icon={Package}    label="Pedidos"          value={stats.totalOrders} accent="blue" />
+        <StatCard icon={Wallet}     label="Subtotal Pedidos" value={formatCOP(stats.totalSubtotal)} accent="emerald" />
+        <StatCard icon={Receipt}    label="IVA Pedidos (19%)" value={formatCOP(stats.totalIva)}     accent="amber" />
+        <StatCard icon={DollarSign} label="Total Pedidos"    value={formatCOP(stats.totalSpent)}    accent="rose" />
       </div>
 
       {/* Presupuesto anual — solo admin_empresa con presupuesto configurado */}
@@ -244,26 +384,32 @@ export default function ClientStats() {
           {(stats.monthly || []).length === 0 ? (
             <p className="text-xs text-gray-400 py-4">Sin datos</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase tracking-wider">
-                    <th className="text-left py-2">Mes</th>
-                    <th className="text-right py-2">Pedidos</th>
-                    <th className="text-right py-2">Gasto</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {stats.monthly.map(m => (
-                    <tr key={m.month}>
-                      <td className="py-2 font-mono text-xs text-gray-600">{m.month}</td>
-                      <td className="py-2 text-right text-gray-700">{m.orders}</td>
-                      <td className="py-2 text-right font-semibold text-gray-800">{formatCOP(m.revenue)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ResponsiveContainer width="100%" height={240}>
+              <AreaChart data={stats.monthly} margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorClientSubtotal" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={SERIES_COLORS.subtotal} stopOpacity={0.15} />
+                    <stop offset="95%" stopColor={SERIES_COLORS.subtotal} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="colorClientIva" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={SERIES_COLORS.iva} stopOpacity={0.15} />
+                    <stop offset="95%" stopColor={SERIES_COLORS.iva} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="colorClientTotal" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={SERIES_COLORS.total} stopOpacity={0.15} />
+                    <stop offset="95%" stopColor={SERIES_COLORS.total} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#9ca3af', fontFamily: 'Montserrat' }} axisLine={false} tickLine={false} />
+                <YAxis tickFormatter={v => v === 0 ? '0' : `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: '#9ca3af', fontFamily: 'Montserrat' }} axisLine={false} tickLine={false} width={48} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'Montserrat' }} />
+                <Area type="monotone" name="Subtotal" dataKey="subtotal" stroke={SERIES_COLORS.subtotal} strokeWidth={2} fill="url(#colorClientSubtotal)" dot={false} activeDot={{ r: 5 }} />
+                <Area type="monotone" name="IVA (19%)" dataKey="iva" stroke={SERIES_COLORS.iva} strokeWidth={2} fill="url(#colorClientIva)" dot={false} activeDot={{ r: 5 }} />
+                <Area type="monotone" name="Total" dataKey="revenue" stroke={SERIES_COLORS.total} strokeWidth={2.5} fill="url(#colorClientTotal)" dot={false} activeDot={{ r: 6 }} />
+              </AreaChart>
+            </ResponsiveContainer>
           )}
         </div>
       </div>

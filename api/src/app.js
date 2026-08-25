@@ -10,6 +10,7 @@ import sucursalesRouter  from './routes/sucursales.js';
 import branchesRouter    from './routes/branches.js';
 import usersRouter       from './routes/users.js';
 import categoriesRouter  from './routes/categories.js';
+import granCategoriasRouter from './routes/granCategorias.js';
 import priceListsRouter  from './routes/priceLists.js';
 import productsRouter    from './routes/products.js';
 import ordersRouter, { purchaseOrderPdfHandler } from './routes/orders.js';
@@ -17,6 +18,7 @@ import commentsRouter    from './routes/comments.js';
 import attachmentsRouter from './routes/attachments.js';
 import catalogRouter     from './routes/catalog.js';
 import statsRouter       from './routes/stats.js';
+import contractsRouter   from './routes/contracts.js';
 import { requireAuth }   from './middleware/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,6 +54,7 @@ api.use('/companies/:companyId/sucursales', sucursalesRouter);
 api.use('/branches',                   branchesRouter);
 api.use('/users',                      usersRouter);
 api.use('/categories',                 categoriesRouter);
+api.use('/gran-categorias',            granCategoriasRouter);
 api.use('/price-lists',                priceListsRouter);
 api.use('/products',                   productsRouter);
 api.use('/orders',                     ordersRouter);
@@ -60,6 +63,7 @@ api.use('/orders/:orderId/comments',   commentsRouter);
 api.use('/orders/:orderId/attachments',attachmentsRouter);
 api.use('/catalog',                    catalogRouter);
 api.use('/stats',                      statsRouter);
+api.use('/contracts',                  contractsRouter);
 
 app.use('/api/v1', api);
 

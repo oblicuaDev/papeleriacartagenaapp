@@ -2,7 +2,7 @@ import logo from '../../logo-cartagena.jpg';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   Home, Package, FolderOpen, ListOrdered, Users, Building2,
-  UserCog, LogOut, Menu, X, ClipboardList, Briefcase,
+  UserCog, LogOut, Menu, X, ClipboardList, Briefcase, FileText,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/admin/listas-precios',    label: 'Listas de precios',         icon: ListOrdered },
   { to: '/admin/pedidos',           label: 'Trabajar pedidos',          icon: ClipboardList },
   { to: '/admin/empresas',          label: 'Empresas',                  icon: Briefcase },
+  { to: '/admin/contratos',         label: 'Contratos',                 icon: FileText },
   { to: '/admin/clientes',          label: 'Usuarios',                  icon: Users },
   { to: '/admin/sedes',             label: 'Sedes',                     icon: Building2 },
   { to: '/admin/asesores',          label: 'Asesores',                  icon: UserCog },

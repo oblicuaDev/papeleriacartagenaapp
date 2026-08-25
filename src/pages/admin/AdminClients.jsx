@@ -24,6 +24,13 @@ const EMPTY_FORM = {
   companyId: '', sucursalId: '', clientRole: 'creador_pedidos',
 };
 
+const CLIENT_ROLE_BADGES = {
+  creador_pedidos:        { label: 'Creador de pedidos',       className: 'bg-gray-100 text-gray-600' },
+  supervisor:              { label: 'Supervisor',                className: 'bg-purple-100 text-purple-700' },
+  administrador_contrato:  { label: 'Administrador de Contrato', className: 'bg-amber-100 text-amber-700' },
+  admin_empresa:           { label: 'Administrador de Empresa',  className: 'bg-blue-100 text-blue-700' },
+};
+
 export default function AdminClients() {
   const { users, refreshUsers, priceLists, companies } = useApp();
   const [showModal, setShowModal] = useState(false);
@@ -147,11 +154,12 @@ export default function AdminClients() {
                     )}
                   </td>
                   <td className="px-5 py-4">
-                    {client.clientRole === 'supervisor' ? (
-                      <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full font-medium">Supervisor</span>
-                    ) : (
-                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-medium">Creador de pedidos</span>
-                    )}
+                    {(() => {
+                      const meta = CLIENT_ROLE_BADGES[client.clientRole] || CLIENT_ROLE_BADGES.creador_pedidos;
+                      return (
+                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${meta.className}`}>{meta.label}</span>
+                      );
+                    })()}
                   </td>
                   <td className="px-5 py-4">
                     <div className="text-sm text-gray-700">{client.contactName || '—'}</div>
@@ -276,10 +284,13 @@ export default function AdminClients() {
               <select className={inputClass} value={form.clientRole} onChange={e => setForm(f => ({ ...f, clientRole: e.target.value }))}>
                 <option value="creador_pedidos">Creador de pedidos</option>
                 <option value="supervisor">Supervisor</option>
+                <option value="administrador_contrato">Administrador de Contrato</option>
               </select>
               <p className="text-xs text-gray-400 mt-1">
                 {form.clientRole === 'supervisor'
-                  ? 'Puede crear pedidos y aprobar los pedidos de creadores de su empresa.'
+                  ? 'Puede crear pedidos y aprobar los pedidos de creadores de su sucursal.'
+                  : form.clientRole === 'administrador_contrato'
+                  ? 'Como supervisor, pero ve y aprueba pedidos de TODAS las sucursales de la empresa.'
                   : 'Crea pedidos que quedan pendientes de aprobación por un supervisor.'}
               </p>
             </div>

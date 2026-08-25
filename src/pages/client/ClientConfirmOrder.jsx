@@ -8,7 +8,7 @@ import { formatCOP } from '../../data/mockData';
 export default function ClientConfirmOrder() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { cart, cartTotal, updateCartItem, removeFromCart, submitOrder, refreshProducts } = useApp();
+  const { cart, cartTotal, cartSubtotal, cartIva, updateCartItem, removeFromCart, submitOrder, refreshProducts } = useApp();
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -148,10 +148,20 @@ export default function ClientConfirmOrder() {
           ))}
         </div>
 
-        {/* Total */}
-        <div className="px-5 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-          <span className="text-sm font-medium text-gray-600">Total del pedido</span>
-          <span className="text-2xl font-bold text-gray-900">{formatCOP(cartTotal)}</span>
+        {/* Subtotal / IVA / Total */}
+        <div className="px-5 py-4 bg-gray-50 border-t border-gray-100 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500">Subtotal</span>
+            <span className="text-sm font-medium text-gray-700">{formatCOP(cartSubtotal)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-500">IVA (19%)</span>
+            <span className="text-sm font-medium text-gray-700">{formatCOP(cartIva)}</span>
+          </div>
+          <div className="flex items-center justify-between pt-1.5 border-t border-gray-200">
+            <span className="text-sm font-semibold text-gray-700">TOTAL PEDIDO</span>
+            <span className="text-2xl font-bold text-gray-900">{formatCOP(cartTotal)}</span>
+          </div>
         </div>
       </div>
 

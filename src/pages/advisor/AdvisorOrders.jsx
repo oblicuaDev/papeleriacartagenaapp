@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2, Building } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2, Building, Wallet, Receipt, DollarSign } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { statsApi } from '../../services/api';
@@ -13,12 +13,34 @@ const MANAGE_STATUSES = ['Pendiente', 'Validar disponibilidad'];
 
 const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
+// Colores consistentes para las 3 curvas de Subtotal/IVA/Total en todos los dashboards.
+const SERIES_COLORS = { subtotal: '#10b981', iva: '#f59e0b', total: '#2563eb' };
+
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-3">
+    <div className="bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-3 space-y-1">
       <p className="text-xs font-semibold text-gray-500 mb-1">{label}</p>
-      <p className="text-base font-bold text-blue-700">{formatCOP(payload[0].value)}</p>
+      {payload.map(p => (
+        <p key={p.dataKey} className="text-sm font-semibold flex items-center gap-2" style={{ color: p.color }}>
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
+          {p.name}: {formatCOP(p.value)}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function StatCard({ label, value, icon: Icon, color }) {
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex items-center gap-4">
+      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${color}`}>
+        <Icon className="w-6 h-6 text-white" />
+      </div>
+      <div>
+        <p className="text-sm text-gray-500 font-medium">{label}</p>
+        <p className="text-2xl font-bold text-gray-900">{value}</p>
+      </div>
     </div>
   );
 }
@@ -112,12 +134,16 @@ export default function AdvisorOrders() {
 
   // Histórico mensual
   const monthlyMap = {};
-  MONTHS.forEach((_, i) => { monthlyMap[i] = 0; });
+  MONTHS.forEach((_, i) => { monthlyMap[i] = { subtotal: 0, iva: 0, total: 0 }; });
   myOrders.forEach(o => {
     const month = new Date(o.createdAt).getMonth();
-    if (!isNaN(month)) monthlyMap[month] = (monthlyMap[month] || 0) + o.total;
+    if (!isNaN(month)) {
+      monthlyMap[month].subtotal += o.subtotal || 0;
+      monthlyMap[month].iva      += o.iva || 0;
+      monthlyMap[month].total    += o.total || 0;
+    }
   });
-  const chartData = MONTHS.map((name, i) => ({ name, total: monthlyMap[i] }));
+  const chartData = MONTHS.map((name, i) => ({ name, ...monthlyMap[i] }));
 
   const filtered = myOrders.filter(order => {
     if (activeTab === 'all') return true;
@@ -203,6 +229,13 @@ export default function AdvisorOrders() {
         />
       </div>
 
+      {/* Subtotal / IVA / Total del periodo seleccionado */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard label="Subtotal Pedidos"  value={formatCOP(stats?.mySubtotal ?? 0)} icon={Wallet}     color="bg-emerald-500" />
+        <StatCard label="IVA Pedidos (19%)" value={formatCOP(stats?.myIva ?? 0)}      icon={Receipt}    color="bg-amber-500"   />
+        <StatCard label="Total Pedidos"     value={formatCOP(stats?.myRevenue ?? 0)}  icon={DollarSign} color="bg-blue-600"    />
+      </div>
+
       {/* Filter Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
         {FILTER_TABS.map(tab => {
@@ -242,7 +275,9 @@ export default function AdvisorOrders() {
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Cliente</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Fecha</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Items</th>
-                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Total</th>
+                <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Subtotal</th>
+                <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">IVA</th>
+                <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Total</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Estado</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Acciones</th>
               </tr>
@@ -256,7 +291,9 @@ export default function AdvisorOrders() {
                     <td className="px-5 py-4 text-sm text-gray-700">{getClientName(order)}</td>
                     <td className="px-5 py-4 text-sm text-gray-500">{order.createdAt}</td>
                     <td className="px-5 py-4 text-sm text-gray-600">{order.itemCount ?? 0}</td>
-                    <td className="px-5 py-4 text-sm font-medium text-gray-800">{formatCOP(order.total)}</td>
+                    <td className="px-5 py-4 text-sm text-gray-600 text-right">{formatCOP(order.subtotal)}</td>
+                    <td className="px-5 py-4 text-sm text-gray-600 text-right">{formatCOP(order.iva)}</td>
+                    <td className="px-5 py-4 text-sm font-medium text-gray-800 text-right">{formatCOP(order.total)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>
                         {statusLabel(order.status)}
@@ -286,7 +323,7 @@ export default function AdvisorOrders() {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-16 text-center">
+                  <td colSpan={9} className="px-5 py-16 text-center">
                     <ClipboardList className="w-12 h-12 text-gray-200 mx-auto mb-3" />
                     <p className="text-sm text-gray-400">No hay pedidos en esta categoría</p>
                   </td>
@@ -332,22 +369,30 @@ export default function AdvisorOrders() {
             <h3 className="text-base font-semibold text-gray-800">Histórico de Consumos</h3>
             <p className="text-xs text-gray-400 mt-0.5">Monto total de pedidos por mes{isFiltered ? ' · filtrado por periodo' : ''}</p>
           </div>
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height={260}>
             <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
               <defs>
-                <linearGradient id="colorAdvisor" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.15} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                <linearGradient id="colorAdvisorSubtotal" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={SERIES_COLORS.subtotal} stopOpacity={0.15} />
+                  <stop offset="95%" stopColor={SERIES_COLORS.subtotal} stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="colorAdvisorIva" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={SERIES_COLORS.iva} stopOpacity={0.15} />
+                  <stop offset="95%" stopColor={SERIES_COLORS.iva} stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="colorAdvisorTotal" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={SERIES_COLORS.total} stopOpacity={0.15} />
+                  <stop offset="95%" stopColor={SERIES_COLORS.total} stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#9ca3af', fontFamily: 'Montserrat' }} axisLine={false} tickLine={false} />
               <YAxis tickFormatter={v => v === 0 ? '0' : `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: '#9ca3af', fontFamily: 'Montserrat' }} axisLine={false} tickLine={false} width={48} />
               <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="total" stroke="#3b82f6" strokeWidth={2.5} fill="url(#colorAdvisor)"
-                dot={{ r: 4, fill: '#3b82f6', strokeWidth: 0 }}
-                activeDot={{ r: 6, fill: '#1d4ed8', strokeWidth: 0 }}
-              />
+              <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'Montserrat' }} />
+              <Area type="monotone" name="Subtotal" dataKey="subtotal" stroke={SERIES_COLORS.subtotal} strokeWidth={2} fill="url(#colorAdvisorSubtotal)" dot={false} activeDot={{ r: 5 }} />
+              <Area type="monotone" name="IVA (19%)" dataKey="iva" stroke={SERIES_COLORS.iva} strokeWidth={2} fill="url(#colorAdvisorIva)" dot={false} activeDot={{ r: 5 }} />
+              <Area type="monotone" name="Total" dataKey="total" stroke={SERIES_COLORS.total} strokeWidth={2.5} fill="url(#colorAdvisorTotal)" dot={false} activeDot={{ r: 6 }} />
             </AreaChart>
           </ResponsiveContainer>
         </div>

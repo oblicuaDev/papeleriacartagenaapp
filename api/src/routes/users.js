@@ -20,7 +20,7 @@ const publicUserFields = `
 router.get('/', (req, res, next) => {
   const { role, clientRole } = req.user;
   if (role === 'admin' || role === 'advisor') return next();
-  if (role === 'client' && (clientRole === 'supervisor' || clientRole === 'admin_empresa')) return next();
+  if (role === 'client' && (clientRole === 'supervisor' || clientRole === 'admin_empresa' || clientRole === 'administrador_contrato')) return next();
   return res.status(403).json({ error: 'No autorizado' });
 }, async (req, res) => {
   const { role: myRole, companyId: myCompanyId } = req.user;
@@ -69,10 +69,12 @@ router.get('/:id', async (req, res) => {
     const user = rows[0];
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    // Solo puede ver si es admin, su propia cuenta, o supervisor de la misma empresa
+    // Solo puede ver si es admin, su propia cuenta, o supervisor/administrador_contrato de la misma empresa
     const isSelf = myId === targetId;
-    const isSupervisorSameCompany = role === 'client' && req.user.clientRole === 'supervisor' && user.company_id === companyId;
-    if (role !== 'admin' && !isSelf && !isSupervisorSameCompany) {
+    const isCompanyManagerSameCompany = role === 'client' &&
+      (req.user.clientRole === 'supervisor' || req.user.clientRole === 'administrador_contrato') &&
+      user.company_id === companyId;
+    if (role !== 'admin' && !isSelf && !isCompanyManagerSameCompany) {
       return res.status(403).json({ error: 'No autorizado' });
     }
     return res.json(user);
@@ -158,8 +160,10 @@ router.put('/:id', async (req, res) => {
   if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
 
   const isSelf = myId === targetId;
-  const isSupervisorSameCompany = myRole === 'client' && req.user.clientRole === 'supervisor' && target.company_id === myCompanyId;
-  if (myRole !== 'admin' && !isSelf && !isSupervisorSameCompany) {
+  const isCompanyManagerSameCompany = myRole === 'client' &&
+    (req.user.clientRole === 'supervisor' || req.user.clientRole === 'administrador_contrato') &&
+    target.company_id === myCompanyId;
+  if (myRole !== 'admin' && !isSelf && !isCompanyManagerSameCompany) {
     return res.status(403).json({ error: 'No autorizado' });
   }
 

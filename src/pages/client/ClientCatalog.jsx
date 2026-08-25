@@ -123,7 +123,7 @@ function ProductModal({
             <p className="text-2xl font-bold text-blue-700">
               {formatCOP(price)}
             </p>
-            <p className="text-xs text-gray-400">por {product.unit}</p>
+            <p className="text-xs text-gray-400">por {product.unit} · IVA incluido (19%)</p>
           </div>
 
           {/* Quantity + Add — solo para roles que crean pedidos */}
@@ -216,9 +216,10 @@ function ProductModal({
 export default function ClientCatalog() {
   const context = useOutletContext() || {};
   const headerSearch = context.search || "";
-  const { categories, addToCart, orders } = useApp();
+  const { categories, granCategorias, addToCart, orders } = useApp();
   const { currentUser } = useAuth();
   const isReadOnly = currentUser?.clientRole === "admin_empresa";
+  const [selectedGranCategoria, setSelectedGranCategoria] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [viewMode, setViewMode] = useState("grid");
   const [modalProduct, setModalProduct] = useState(null);
@@ -234,7 +235,19 @@ export default function ClientCatalog() {
   // Resetea página al cambiar filtros/búsqueda.
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, selectedCategory]);
+  }, [debouncedSearch, selectedGranCategoria, selectedCategory]);
+
+  // Al cambiar la gran categoría, si la subcategoría elegida ya no pertenece
+  // a ella, se limpia para evitar un filtro inconsistente.
+  function handleSelectGranCategoria(id) {
+    setSelectedGranCategoria(id);
+    if (
+      selectedCategory &&
+      categories.find((c) => c.id === selectedCategory)?.granCategoriaId !== id
+    ) {
+      setSelectedCategory(null);
+    }
+  }
 
   // Fetch server-side: backend filtra por search + categoryId y pagina.
   const [products, setProducts] = useState([]);
@@ -248,6 +261,7 @@ export default function ClientCatalog() {
     const params = { page, limit: PAGE_SIZE };
     if (debouncedSearch) params.search = debouncedSearch;
     if (selectedCategory) params.categoryId = selectedCategory;
+    if (selectedGranCategoria) params.granCategoriaId = selectedGranCategoria;
 
     catalogApi
       .list(params)
@@ -266,7 +280,7 @@ export default function ClientCatalog() {
         if (myReqId !== reqIdRef.current) return;
         setLoading(false);
       });
-  }, [debouncedSearch, selectedCategory, page]);
+  }, [debouncedSearch, selectedGranCategoria, selectedCategory, page]);
 
   function getCategoryName(id) {
     return categories.find((c) => c.id === id)?.name || "—";
@@ -355,6 +369,7 @@ export default function ClientCatalog() {
     !isReadOnly &&
     suggestedProducts.length > 0 &&
     !debouncedSearch &&
+    !selectedGranCategoria &&
     !selectedCategory &&
     page === 1;
 
@@ -407,9 +422,10 @@ export default function ClientCatalog() {
                 <p className="text-xs font-medium text-gray-800 line-clamp-2 mb-1">
                   {product.name}
                 </p>
-                <p className="text-sm font-bold text-blue-700 mb-2">
+                <p className="text-sm font-bold text-blue-700 mb-0.5">
                   {formatCOP(product.price)}
                 </p>
+                <p className="text-[10px] text-gray-400 mb-2">IVA incl.</p>
                 <button
                   onClick={(e) => handleQuickAdd(e, product)}
                   className="w-full flex items-center justify-center gap-1 py-1.5 bg-blue-700 text-white rounded text-xs font-semibold hover:bg-blue-800 transition"
@@ -423,28 +439,57 @@ export default function ClientCatalog() {
         </div>
       )}
 
-      {/* Category Dropdown + View Toggle */}
+      {/* Filtros de categoría + View Toggle */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="relative">
-          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
-          <select
-            value={selectedCategory ?? ""}
-            onChange={(e) =>
-              setSelectedCategory(
-                e.target.value ? Number(e.target.value) : null,
-              )
-            }
-            className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[220px]"
-          >
-            <option value="">Todas las categorías</option>
-            {categories
-              .filter((c) => c.active)
-              .map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-          </select>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+            <select
+              value={selectedGranCategoria ?? ""}
+              onChange={(e) =>
+                handleSelectGranCategoria(
+                  e.target.value ? Number(e.target.value) : null,
+                )
+              }
+              className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[200px]"
+            >
+              <option value="">Todas las categorías</option>
+              {granCategorias
+                .filter((g) => g.active)
+                .map((gc) => (
+                  <option key={gc.id} value={gc.id}>
+                    {gc.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4 pointer-events-none" />
+            <select
+              value={selectedCategory ?? ""}
+              onChange={(e) =>
+                setSelectedCategory(
+                  e.target.value ? Number(e.target.value) : null,
+                )
+              }
+              className="pl-9 pr-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white min-w-[220px]"
+            >
+              <option value="">Todas las subcategorías</option>
+              {categories
+                .filter(
+                  (c) =>
+                    c.active &&
+                    (!selectedGranCategoria ||
+                      c.granCategoriaId === selectedGranCategoria),
+                )
+                .map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex border border-gray-300 rounded-lg overflow-hidden">
@@ -507,7 +552,7 @@ export default function ClientCatalog() {
                     <p className="text-xl font-bold text-blue-700">
                       {formatCOP(price)}
                     </p>
-                    <p className="text-xs text-gray-400">por {product.unit}</p>
+                    <p className="text-xs text-gray-400">por {product.unit} · IVA incl.</p>
                   </div>
                   {!isReadOnly && (
                     <button
@@ -586,7 +631,7 @@ export default function ClientCatalog() {
                         <p className="text-sm font-bold text-blue-700">
                           {formatCOP(price)}
                         </p>
-                        <p className="text-xs text-gray-400">/{product.unit}</p>
+                        <p className="text-xs text-gray-400">/{product.unit} · IVA incl.</p>
                       </td>
                       {!isReadOnly && (
                         <td className="px-4 py-3 text-right">

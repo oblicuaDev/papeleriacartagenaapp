@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import QuantityInput from '../../components/QuantityInput';
 import { ordersApi } from '../../services/api';
 import { STATUS_STYLES, formatCOP, splitIva } from '../../data/mockData';
 
@@ -295,13 +296,11 @@ export default function ClientOrderDetail() {
                       </td>
                       <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                       <td className="px-5 py-3 text-sm text-gray-700 text-center">
-                        <input
-                          type="number"
-                          min={1}
+                        <QuantityInput
+                          size="sm"
                           disabled={item.removed}
                           value={item.quantity}
-                          onChange={(e) => setQty(item.productId, e.target.value)}
-                          className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                          onChange={(n) => setQty(item.productId, n)}
                         />
                       </td>
                       <td className="px-5 py-3 text-sm text-gray-700 text-right">{formatCOP(item.unitPrice)}</td>

@@ -16,6 +16,7 @@ import AdminOrders from './pages/admin/AdminOrders';
 import AdminOrderDetail from './pages/admin/AdminOrderDetail';
 import AdminCompanies from './pages/admin/AdminCompanies';
 import AdminContracts from './pages/admin/AdminContracts';
+import AdminReports from './pages/admin/AdminReports';
 import ClientLayout from './pages/client/ClientLayout';
 import ClientCatalog from './pages/client/ClientCatalog';
 import ClientOrders from './pages/client/ClientOrders';
@@ -58,6 +59,7 @@ export default function App() {
             <Route path="pedidos" element={<AdminOrders />} />
             <Route path="sedes" element={<AdminBranches />} />
             <Route path="asesores" element={<AdminUsers />} />
+            <Route path="reportes" element={<AdminReports />} />
           </Route>
           <Route
             path="/cliente"

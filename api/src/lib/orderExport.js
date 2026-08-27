@@ -13,7 +13,7 @@ const COMPANY_NAME = 'Papelería Cartagena';
 
 // Inserta el logo en la esquina superior izquierda de la hoja.
 // Devuelve el número de filas que ocupó el header (para empujar el contenido).
-function embedHeaderLogo(wb, ws, { rowSpan = 4 } = {}) {
+export function embedHeaderLogo(wb, ws, { rowSpan = 4 } = {}) {
   if (!fs.existsSync(LOGO_PATH)) return 0;
   try {
     const ext = LOGO_PATH.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';

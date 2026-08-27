@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, Trash2, Minus, Plus, CheckCircle, ArrowLeft, FileText } from 'lucide-react';
+import { ShoppingCart, Trash2, CheckCircle, ArrowLeft, FileText } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import QuantityInput from '../../components/QuantityInput';
 import { formatCOP } from '../../data/mockData';
 
 export default function ClientConfirmOrder() {
@@ -118,21 +119,11 @@ export default function ClientConfirmOrder() {
               </div>
 
               {/* Quantity controls */}
-              <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => updateCartItem(item.productId, item.quantity - 1)}
-                  className="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition"
-                >
-                  <Minus className="w-3 h-3" />
-                </button>
-                <span className="w-10 text-center text-sm font-medium text-gray-800">{item.quantity}</span>
-                <button
-                  onClick={() => updateCartItem(item.productId, item.quantity + 1)}
-                  className="w-8 h-8 flex items-center justify-center text-gray-500 hover:bg-gray-100 transition"
-                >
-                  <Plus className="w-3 h-3" />
-                </button>
-              </div>
+              <QuantityInput
+                size="sm"
+                value={item.quantity}
+                onChange={(n) => updateCartItem(item.productId, n)}
+              />
 
               <p className="text-sm font-bold text-blue-700 w-24 text-right">
                 {formatCOP(item.unitPrice * item.quantity)}

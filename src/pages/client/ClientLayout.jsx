@@ -1,9 +1,10 @@
 import logo from '../../logo-cartagena.jpg';
 import { useState } from 'react';
 import { NavLink, Link, Outlet, useNavigate } from 'react-router-dom';
-import { ShoppingCart, LogOut, X, Minus, Plus, Trash2, Search, ClipboardCheck, Users, BarChart3, HelpCircle } from 'lucide-react';
+import { ShoppingCart, LogOut, X, Trash2, Search, ClipboardCheck, Users, BarChart3, HelpCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
+import QuantityInput from '../../components/QuantityInput';
 import { formatCOP } from '../../data/mockData';
 import CreditsFooter from '../../components/CreditsFooter';
 
@@ -220,21 +221,11 @@ export default function ClientLayout() {
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => updateCartItem(item.productId, item.quantity - 1)}
-                              className="w-6 h-6 flex items-center justify-center border border-gray-300 rounded text-gray-600 hover:bg-gray-100 transition"
-                            >
-                              <Minus className="w-3 h-3" />
-                            </button>
-                            <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
-                            <button
-                              onClick={() => updateCartItem(item.productId, item.quantity + 1)}
-                              className="w-6 h-6 flex items-center justify-center border border-gray-300 rounded text-gray-600 hover:bg-gray-100 transition"
-                            >
-                              <Plus className="w-3 h-3" />
-                            </button>
-                          </div>
+                          <QuantityInput
+                            size="sm"
+                            value={item.quantity}
+                            onChange={(n) => updateCartItem(item.productId, n)}
+                          />
                         </div>
                       </div>
                     ))}

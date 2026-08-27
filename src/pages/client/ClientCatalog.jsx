@@ -5,7 +5,6 @@ import {
   Grid,
   List,
   Plus,
-  Minus,
   X,
   Package,
   Filter,
@@ -17,6 +16,7 @@ import {
 } from "lucide-react";
 import { useApp } from "../../context/AppContext";
 import { useAuth } from "../../context/AuthContext";
+import QuantityInput from "../../components/QuantityInput";
 import { catalogApi } from "../../services/api";
 import { formatCOP } from "../../data/mockData";
 import productFallback from "../../product.webp";
@@ -129,27 +129,7 @@ function ProductModal({
           {/* Quantity + Add — solo para roles que crean pedidos */}
           {!readOnly && !added && (
             <div className="flex items-center gap-3 pt-1">
-              <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => setQty((q) => Math.max(1, q - 1))}
-                  className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-100 transition"
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </button>
-                <input
-                  type="number"
-                  min={1}
-                  value={qty}
-                  onChange={(e) => setQty(Math.max(1, Number(e.target.value)))}
-                  className="w-14 text-center py-2 text-sm font-medium focus:outline-none border-x border-gray-300"
-                />
-                <button
-                  onClick={() => setQty((q) => q + 1)}
-                  className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-100 transition"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                </button>
-              </div>
+              <QuantityInput value={qty} onChange={setQty} />
               <button
                 onClick={handleAdd}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg text-sm font-semibold transition"

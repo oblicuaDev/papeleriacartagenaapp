@@ -41,8 +41,25 @@ async function fetchAllPaginated(apiFn, baseParams = {}, pageSize = 1000) {
   return all;
 }
 
+const CART_STORAGE_KEY = "pc_cart";
+
+// El carrito se persiste en localStorage para que un pedido a medio armar
+// sobreviva a recargas y al cierre de la pestana/navegador. Se guarda junto
+// al userId para no arrastrar el carrito de otra cuenta en el mismo navegador.
+function loadStoredCart() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || "null");
+    return {
+      userId: raw?.userId ?? null,
+      items: Array.isArray(raw?.items) ? raw.items : [],
+    };
+  } catch {
+    return { userId: null, items: [] };
+  }
+}
+
 export function AppProvider({ children }) {
-  const { currentUser } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
 
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -52,11 +69,15 @@ export function AppProvider({ children }) {
   const [orders, setOrders] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [users, setUsers] = useState([]);
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(() => loadStoredCart().items);
   const [loadingApp, setLoadingApp] = useState(false);
 
   // Cargar datos base cuando el usuario está autenticado
   useEffect(() => {
+    // Mientras AuthContext hidrata la sesion (token -> perfil) no tocamos nada,
+    // para no borrar el carrito persistido en una recarga.
+    if (authLoading) return;
+
     if (!currentUser) {
       setProducts([]);
       setCategories([]);
@@ -66,9 +87,16 @@ export function AppProvider({ children }) {
       setOrders([]);
       setCompanies([]);
       setUsers([]);
-      setCart([]);
+      clearCart();
       return;
     }
+
+    // Si el carrito guardado pertenece a otra cuenta, descartarlo.
+    const stored = loadStoredCart();
+    if (stored.userId != null && stored.userId !== currentUser.id) {
+      clearCart();
+    }
+
     setLoadingApp(true);
     const role = currentUser.role;
 
@@ -138,7 +166,22 @@ export function AppProvider({ children }) {
       }
       setLoadingApp(false);
     });
-  }, [currentUser]);
+  }, [currentUser, authLoading]);
+
+  // Persistir el carrito en cada cambio (junto al userId dueno).
+  useEffect(() => {
+    // No escribir mientras la sesion aun se hidrata: sobreescribiria el userId
+    // dueno con null y romperia el chequeo de "carrito de otra cuenta".
+    if (authLoading) return;
+    try {
+      localStorage.setItem(
+        CART_STORAGE_KEY,
+        JSON.stringify({ userId: currentUser?.id ?? null, items: cart }),
+      );
+    } catch {
+      /* almacenamiento no disponible: el carrito sigue en memoria */
+    }
+  }, [cart, currentUser, authLoading]);
 
   // ── Carrito ─────────────────────────────────────────────────
   function addToCart(product, quantity, unitPrice) {
@@ -180,6 +223,11 @@ export function AppProvider({ children }) {
 
   function clearCart() {
     setCart([]);
+    try {
+      localStorage.removeItem(CART_STORAGE_KEY);
+    } catch {
+      /* noop */
+    }
   }
 
   // ── Crear pedido → API ──────────────────────────────────────

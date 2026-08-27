@@ -210,3 +210,42 @@ export const statsApi = {
     return res.blob();
   },
 };
+
+// ── Reportes dinamicos (solo admin) ─────────────────────────
+export const reportsApi = {
+  // Metadata de todos los datasets (label, columnas, filtros) para el form.
+  // fetch crudo: no queremos que deepCamel altere las claves de dataset
+  // (order_items -> orderItems) ni las keys de columnas.
+  meta: async () => {
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/reports`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
+
+  // Estimado de filas con los filtros actuales.
+  count: async (dataset, params = {}) => {
+    const qs = new URLSearchParams({ ...params, count: '1' }).toString();
+    const res = await get(`/reports/${dataset}?${qs}`);
+    return res?.count ?? 0;
+  },
+
+  // Genera el archivo (xlsx/csv). Devuelve un Blob.
+  generate: async (dataset, params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/reports/${dataset}${qs ? `?${qs}` : ''}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      let msg = `Reporte fallo: HTTP ${res.status}`;
+      try { msg = (await res.json())?.error || msg; } catch { /* noop */ }
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    return res.blob();
+  },
+};

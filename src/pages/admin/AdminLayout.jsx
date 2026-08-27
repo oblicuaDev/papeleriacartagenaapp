@@ -2,7 +2,7 @@ import logo from '../../logo-cartagena.jpg';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   Home, Package, FolderOpen, ListOrdered, Users, Building2,
-  UserCog, LogOut, Menu, X, ClipboardList, Briefcase, FileText,
+  UserCog, LogOut, Menu, X, ClipboardList, Briefcase, FileText, FileSpreadsheet,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
@@ -19,6 +19,7 @@ const NAV_ITEMS = [
   { to: '/admin/clientes',          label: 'Usuarios',                  icon: Users },
   { to: '/admin/sedes',             label: 'Sedes',                     icon: Building2 },
   { to: '/admin/asesores',          label: 'Asesores',                  icon: UserCog },
+  { to: '/admin/reportes',         label: 'Reportes',                  icon: FileSpreadsheet },
 ];
 
 export default function AdminLayout() {

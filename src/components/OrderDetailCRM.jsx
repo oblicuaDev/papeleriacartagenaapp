@@ -14,6 +14,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useApp } from "../context/AppContext";
+import QuantityInput from "./QuantityInput";
 import { ordersApi } from "../services/api";
 import {
   ArrowLeft,
@@ -305,13 +306,11 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
                 </td>
                 <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                 <td className="px-5 py-3 text-sm text-gray-700 text-center">
-                  <input
-                    type="number"
-                    min={1}
+                  <QuantityInput
+                    size="sm"
                     disabled={item.removed}
                     value={item.quantity}
-                    onChange={(e) => setQty(item.productId, e.target.value)}
-                    className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                    onChange={(n) => setQty(item.productId, n)}
                   />
                 </td>
                 <td className="px-5 py-3 text-sm text-gray-700 text-right">{formatCOP(item.unitPrice)}</td>

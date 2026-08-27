@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Package, ExternalLink, Repeat, Filter, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { STATUS_STYLES, formatCOP, statusLabel } from '../../data/mockData';
+import { STATUS_STYLES, formatCOP, statusLabel, splitIva } from '../../data/mockData';
 import { ordersApi } from '../../services/api';
 
 // Estados que componen el grupo "En entrega" (logistica posterior al asesor).
@@ -36,12 +36,16 @@ export default function ClientOrders() {
   const isReadOnly        = currentUser?.clientRole === 'admin_empresa';
   const isSupervisor      = currentUser?.clientRole === 'supervisor';
   const isAdminEmpresa    = currentUser?.clientRole === 'admin_empresa';
+  const isAdminContrato   = currentUser?.clientRole === 'administrador_contrato';
   const isCreador         = currentUser?.clientRole === 'creador_pedidos';
+  // admin_empresa (solo lectura) y administrador_contrato ven toda la empresa.
+  const isCompanyWide     = isAdminEmpresa || isAdminContrato;
 
   const [tab, setTab]                 = useState('all');
   const [creatorId, setCreatorId]     = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sucursalId, setSucursalId]   = useState('');
+  const [orderIdQuery, setOrderIdQuery] = useState('');
   const [dateFrom, setDateFrom]       = useState('');
   const [dateTo, setDateTo]           = useState('');
 
@@ -61,13 +65,13 @@ export default function ClientOrders() {
         )
         .map(u => u.id);
     }
-    if (isAdminEmpresa) {
+    if (isCompanyWide) {
       return users
         .filter(u => u.role === 'client' && u.companyId === currentUser?.companyId)
         .map(u => u.id);
     }
     return [];
-  }, [users, currentUser, isCreador, isSupervisor, isAdminEmpresa]);
+  }, [users, currentUser, isCreador, isSupervisor, isCompanyWide]);
 
   // Conjuntos auxiliares para filtros
   const creatorOptions = useMemo(() => {
@@ -107,18 +111,20 @@ export default function ClientOrders() {
   }
 
   const filtered = useMemo(() => {
+    const q = orderIdQuery.trim().toLowerCase();
     return myOrders.filter(o => {
       if (!tabMatches(o)) return false;
+      if (q && !String(o.id).toLowerCase().includes(q)) return false;
       if (creatorId && o.clientId !== Number(creatorId)) return false;
       if (statusFilter && o.status !== statusFilter) return false;
-      if (sucursalId && isAdminEmpresa) {
+      if (sucursalId && isCompanyWide) {
         const u = userById[o.clientId];
         if (!u || u.sucursalId !== Number(sucursalId)) return false;
       }
       if (!inDateRange(o.createdAt)) return false;
       return true;
     });
-  }, [myOrders, tab, creatorId, statusFilter, sucursalId, dateFrom, dateTo, userById, isAdminEmpresa]);
+  }, [myOrders, tab, creatorId, statusFilter, sucursalId, orderIdQuery, dateFrom, dateTo, userById, isCompanyWide]);
 
   function tabCount(tabValue) {
     return myOrders.filter(o => {
@@ -132,11 +138,12 @@ export default function ClientOrders() {
     setCreatorId('');
     setStatusFilter('');
     setSucursalId('');
+    setOrderIdQuery('');
     setDateFrom('');
     setDateTo('');
   }
 
-  const hasActiveFilters = creatorId || statusFilter || sucursalId || dateFrom || dateTo;
+  const hasActiveFilters = creatorId || statusFilter || sucursalId || orderIdQuery || dateFrom || dateTo;
 
   async function handleRepeatOrder(e, orderId) {
     e.stopPropagation();
@@ -252,24 +259,34 @@ export default function ClientOrders() {
         ))}
       </div>
 
-      {/* Filtros — solo para roles que ven pedidos de otros */}
-      {!isCreador && (
-        <div className="bg-white rounded-xl border border-gray-100 p-4 flex items-center gap-3 flex-wrap">
+      {/* Filtros */}
+      <div className="bg-white rounded-xl border border-gray-100 p-4 flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
             <Filter className="w-4 h-4" /> Filtros
           </div>
 
-          <select
-            value={creatorId}
-            onChange={e => setCreatorId(e.target.value)}
+          <input
+            type="text"
+            value={orderIdQuery}
+            onChange={e => setOrderIdQuery(e.target.value)}
             className={inputCls}
-            title="Creador del pedido"
-          >
-            <option value="">Todos los creadores</option>
-            {creatorOptions.map(u => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </select>
+            placeholder="# de pedido (ORD-…)"
+            title="Buscar por número de pedido"
+          />
+
+          {!isCreador && (
+            <select
+              value={creatorId}
+              onChange={e => setCreatorId(e.target.value)}
+              className={inputCls}
+              title="Creador del pedido"
+            >
+              <option value="">Todos los creadores</option>
+              {creatorOptions.map(u => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+          )}
 
           <select
             value={statusFilter}
@@ -283,8 +300,8 @@ export default function ClientOrders() {
             ))}
           </select>
 
-          {/* Filtro de sucursal — SOLO admin_empresa */}
-          {isAdminEmpresa && sucursales.length > 0 && (
+          {/* Filtro de sucursal — admin_empresa / administrador_contrato */}
+          {isCompanyWide && sucursales.length > 0 && (
             <select
               value={sucursalId}
               onChange={e => setSucursalId(e.target.value)}
@@ -321,8 +338,7 @@ export default function ClientOrders() {
               <X className="w-3.5 h-3.5" /> Limpiar
             </button>
           )}
-        </div>
-      )}
+      </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
@@ -335,7 +351,9 @@ export default function ClientOrders() {
                 )}
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Fecha</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Items</th>
-                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Total</th>
+                <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Subtotal</th>
+                <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">IVA</th>
+                <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Total</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Estado</th>
                 <th className="px-5 py-3"></th>
               </tr>
@@ -355,7 +373,18 @@ export default function ClientOrders() {
                     )}
                     <td className="px-5 py-4 text-sm text-gray-600">{order.createdAt}</td>
                     <td className="px-5 py-4 text-sm text-gray-600">{order.itemCount ?? (order.items || []).length} ítem(s)</td>
-                    <td className="px-5 py-4 text-sm font-semibold text-gray-800">{formatCOP(order.total)}</td>
+                    {(() => {
+                      const fb = splitIva(order.total);
+                      const sub = order.subtotal != null ? order.subtotal : fb.subtotal;
+                      const iva = order.iva != null ? order.iva : fb.iva;
+                      return (
+                        <>
+                          <td className="px-5 py-4 text-sm text-gray-600 text-right">{formatCOP(sub)}</td>
+                          <td className="px-5 py-4 text-sm text-gray-600 text-right">{formatCOP(iva)}</td>
+                        </>
+                      );
+                    })()}
+                    <td className="px-5 py-4 text-sm font-semibold text-gray-800 text-right">{formatCOP(order.total)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style.bg} ${style.text} ${style.border}`}>
                         {statusLabel(order.status)}
@@ -387,7 +416,7 @@ export default function ClientOrders() {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={showCreatorColumn ? 7 : 6} className="px-5 py-16 text-center">
+                  <td colSpan={showCreatorColumn ? 9 : 8} className="px-5 py-16 text-center">
                     <Package className="w-12 h-12 text-gray-200 mx-auto mb-3" />
                     <p className="text-sm text-gray-400">No hay pedidos en esta categoría</p>
                   </td>

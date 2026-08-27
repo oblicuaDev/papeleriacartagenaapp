@@ -52,6 +52,8 @@ const DELIVERY_VISIBLE_STATUSES = ['Alistamiento', 'En Ruta', 'Entregado'];
 router.get('/', async (req, res) => {
   const { role, id: myId, companyId } = req.user;
   const clientRole = req.user.clientRole;
+  // "Direccion Comercial": asesor que ve/trabaja pedidos de cualquier vendedor.
+  const allOrders = role === 'advisor' && req.user.allOrdersAccess;
   const { status, clientId, advisorId, companyId: qCompanyId, dateFrom, dateTo, search, page = 1, limit = 20 } = req.query;
 
   const pageNum  = Math.max(1, parseInt(page));
@@ -63,7 +65,9 @@ router.get('/', async (req, res) => {
 
   // Filtros automáticos por rol
   if (role === 'advisor') {
-    conditions.push(`o.advisor_id = $${params.push(myId)}`);
+    // Con cobertura total (Direccion Comercial) ve los pedidos de todos los
+    // asesores; sin ella, solo los suyos.
+    if (!allOrders) conditions.push(`o.advisor_id = $${params.push(myId)}`);
     conditions.push(`o.status NOT IN ('Pendiente por aprobar', 'Rechazado')`);
   } else if (role === 'client' && clientRole === 'creador_pedidos') {
     conditions.push(`o.client_id = $${params.push(myId)}`);
@@ -92,7 +96,7 @@ router.get('/', async (req, res) => {
   // Filtros opcionales (solo admin puede aplicar todos)
   if (status)    conditions.push(`o.status = $${params.push(status)}`);
   if (clientId && role === 'admin')  conditions.push(`o.client_id  = $${params.push(parseInt(clientId))}`);
-  if (advisorId && role === 'admin') conditions.push(`o.advisor_id = $${params.push(parseInt(advisorId))}`);
+  if (advisorId && (role === 'admin' || allOrders)) conditions.push(`o.advisor_id = $${params.push(parseInt(advisorId))}`);
   if (qCompanyId && role === 'admin') {
     conditions.push(`o.client_id IN (SELECT id FROM users WHERE company_id = $${params.push(parseInt(qCompanyId))})`);
   }
@@ -147,7 +151,7 @@ router.get('/', async (req, res) => {
 async function canViewOrder(req, order) {
   const { role, id: myId, companyId, clientRole, sucursalId } = req.user;
   if (role === 'admin') return true;
-  if (role === 'advisor') return order.advisor_id === myId;
+  if (role === 'advisor') return req.user.allOrdersAccess || order.advisor_id === myId;
   if (role === 'delivery') {
     return order.delivery_id === myId &&
            DELIVERY_VISIBLE_STATUSES.includes(order.status);
@@ -215,6 +219,58 @@ router.get('/:id/export.xlsx', async (req, res) => {
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${orderId}.xlsx"`);
+    return res.send(buf);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error generando el Excel del pedido' });
+  }
+});
+
+// GET /orders/:id/pedido.pdf — PDF del pedido SIN marca (descarga del cliente).
+// A diferencia de purchase-order.pdf: sin logo/nombre de empresa y disponible
+// en cualquier estado del pedido.
+router.get('/:id/pedido.pdf', async (req, res) => {
+  const orderId = req.params.id.toUpperCase();
+  try {
+    const { rows: head } = await pool.query(
+      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
+      [orderId]
+    );
+    if (!head[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (!(await canViewOrder(req, head[0]))) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    const { order, items } = await loadOrderContext(orderId);
+    const buf = await renderPdfBuffer({ order, items, plain: true });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="pedido_${orderId}.pdf"`);
+    return res.send(buf);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error generando el PDF del pedido' });
+  }
+});
+
+// GET /orders/:id/pedido.xlsx — Excel del pedido SIN marca (descarga del cliente).
+router.get('/:id/pedido.xlsx', async (req, res) => {
+  const orderId = req.params.id.toUpperCase();
+  try {
+    const { rows: head } = await pool.query(
+      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
+      [orderId]
+    );
+    if (!head[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (!(await canViewOrder(req, head[0]))) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    const { order, items } = await loadOrderContext(orderId);
+    const buf = await buildOrderDetailXlsx({ order, items, plain: true });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="pedido_${orderId}.xlsx"`);
     return res.send(buf);
   } catch (err) {
     console.error(err);
@@ -606,6 +662,7 @@ router.post('/', requireRole('client'), async (req, res) => {
 router.put('/:id', async (req, res) => {
   const { role, id: myId, companyId, sucursalId } = req.user;
   const clientRole = req.user.clientRole;
+  const allOrders = role === 'advisor' && req.user.allOrdersAccess;
   const orderId = req.params.id.toUpperCase();
   const { status, carrier, advisorId, deliveryId, reason } = req.body;
 
@@ -641,8 +698,9 @@ router.put('/:id', async (req, res) => {
       if (role === 'admin') {
         allowedTransitions = VALID_TRANSITIONS.admin[order.status] || [];
       } else if (role === 'advisor') {
-        // Advisor solo puede tocar pedidos asignados a el (o sin asignar -> se auto-asigna)
-        if (order.advisor_id && order.advisor_id !== myId) {
+        // Advisor solo puede tocar pedidos asignados a el (o sin asignar -> se auto-asigna).
+        // Con cobertura total (Direccion Comercial) puede trabajar cualquier pedido.
+        if (order.advisor_id && order.advisor_id !== myId && !allOrders) {
           await client.query('ROLLBACK');
           return res.status(403).json({ error: 'Pedido asignado a otro asesor' });
         }
@@ -840,6 +898,7 @@ const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente', 'Validar d
 // order_comments. Recalcula total y regenera el PDF de orden de compra.
 router.put('/:id/items', async (req, res) => {
   const { role, id: myId, clientRole, companyId, sucursalId } = req.user;
+  const allOrders = role === 'advisor' && req.user.allOrdersAccess;
   const orderId = req.params.id.toUpperCase();
   const { items, reason } = req.body;
 
@@ -913,7 +972,7 @@ router.put('/:id/items', async (req, res) => {
       return res.status(403).json({ error: 'No tiene permiso para modificar items de este pedido' });
     }
 
-    if (role === 'advisor' && order.advisor_id && order.advisor_id !== myId) {
+    if (role === 'advisor' && order.advisor_id && order.advisor_id !== myId && !allOrders) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Pedido asignado a otro asesor' });
     }

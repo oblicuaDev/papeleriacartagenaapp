@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2, Building, Wallet, Receipt, DollarSign } from 'lucide-react';
+import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2, Building, Wallet, Receipt, DollarSign, UserCog } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -82,7 +82,15 @@ export default function AdvisorOrders() {
   const [dateFrom, setDateFrom]   = useState('');
   const [dateTo, setDateTo]       = useState('');
   const [companyFilter, setCompanyFilter] = useState('');
+  const [vendorFilter, setVendorFilter] = useState('');
   const [stats, setStats] = useState(null);
+
+  // "Direccion Comercial": ve y trabaja pedidos de todos los vendedores.
+  const coversAll = !!currentUser?.allOrdersAccess;
+  const advisorUsers = useMemo(
+    () => users.filter(u => u.role === 'advisor').sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+    [users],
+  );
 
   // Inicializa el filtro empresa desde la URL (?empresa=N) cuando se navega
   // desde la vista de empresas asignadas.
@@ -103,7 +111,7 @@ export default function AdvisorOrders() {
     return m;
   }, [users]);
 
-  const isFiltered = dateFrom || dateTo || companyFilter;
+  const isFiltered = dateFrom || dateTo || companyFilter || vendorFilter;
 
   function inRange(dateStr) {
     const d = new Date(dateStr);
@@ -118,8 +126,12 @@ export default function AdvisorOrders() {
     return u && u.companyId === Number(companyFilter);
   }
 
-  const myOrders = orders.filter(o => o.advisorId === currentUser?.id && o.status !== 'Pendiente por aprobar' && inRange(o.createdAt) && matchesCompany(o));
-  const allMyOrders = orders.filter(o => o.advisorId === currentUser?.id && o.status !== 'Pendiente por aprobar'); // for tab counts
+  // Con cobertura total el asesor ve los pedidos de todos los vendedores.
+  const mine = o => coversAll || o.advisorId === currentUser?.id;
+  const matchesVendor = o => !vendorFilter || o.advisorId === Number(vendorFilter);
+
+  const myOrders = orders.filter(o => mine(o) && o.status !== 'Pendiente por aprobar' && inRange(o.createdAt) && matchesCompany(o) && matchesVendor(o));
+  const allMyOrders = orders.filter(o => mine(o) && o.status !== 'Pendiente por aprobar'); // for tab counts
 
   const deliveredOrders = myOrders.filter(o => o.status === 'Entregado');
   const deliveredPct = myOrders.length > 0
@@ -155,12 +167,19 @@ export default function AdvisorOrders() {
     return order.clientName || users.find(u => u.id === order.clientId)?.name || '—';
   }
 
+  function getVendorName(order) {
+    return order.advisorName || userById[order.advisorId]?.name || '— Sin asignar —';
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Pedidos Asignados</h2>
-          <p className="text-sm text-gray-500 mt-1">{myOrders.length} pedidos en el periodo</p>
+          <h2 className="text-2xl font-bold text-gray-900">{coversAll ? 'Todos los pedidos' : 'Pedidos Asignados'}</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            {myOrders.length} pedidos en el periodo
+            {coversAll && ' · cobertura total (todos los vendedores)'}
+          </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
@@ -191,9 +210,25 @@ export default function AdvisorOrders() {
             <span className="text-xs font-medium text-gray-500">Hasta</span>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className={inputCls} />
           </div>
+          {coversAll && (
+            <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
+              <UserCog className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              <select
+                value={vendorFilter}
+                onChange={e => setVendorFilter(e.target.value)}
+                className={inputCls}
+                title="Vendedor"
+              >
+                <option value="">Todos los vendedores</option>
+                {advisorUsers.map(u => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {isFiltered && (
             <button
-              onClick={() => { setDateFrom(''); setDateTo(''); setCompanyFilter(''); setSearchParams({}); }}
+              onClick={() => { setDateFrom(''); setDateTo(''); setCompanyFilter(''); setVendorFilter(''); setSearchParams({}); }}
               className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-red-600 hover:bg-red-50 border border-gray-200 rounded-xl transition"
             >
               <X className="w-4 h-4" />
@@ -273,6 +308,9 @@ export default function AdvisorOrders() {
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3"># Pedido</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Cliente</th>
+                {coversAll && (
+                  <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Vendedor</th>
+                )}
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Fecha</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Items</th>
                 <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Subtotal</th>
@@ -289,6 +327,9 @@ export default function AdvisorOrders() {
                   <tr key={order.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-5 py-4 text-sm font-mono font-medium text-blue-700">{order.id}</td>
                     <td className="px-5 py-4 text-sm text-gray-700">{getClientName(order)}</td>
+                    {coversAll && (
+                      <td className="px-5 py-4 text-sm text-gray-600">{getVendorName(order)}</td>
+                    )}
                     <td className="px-5 py-4 text-sm text-gray-500">{order.createdAt}</td>
                     <td className="px-5 py-4 text-sm text-gray-600">{order.itemCount ?? 0}</td>
                     <td className="px-5 py-4 text-sm text-gray-600 text-right">{formatCOP(order.subtotal)}</td>
@@ -323,7 +364,7 @@ export default function AdvisorOrders() {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-5 py-16 text-center">
+                  <td colSpan={coversAll ? 10 : 9} className="px-5 py-16 text-center">
                     <ClipboardList className="w-12 h-12 text-gray-200 mx-auto mb-3" />
                     <p className="text-sm text-gray-400">No hay pedidos en esta categoría</p>
                   </td>

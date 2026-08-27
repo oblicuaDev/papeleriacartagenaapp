@@ -478,6 +478,13 @@ ALTER TABLE users ADD  CONSTRAINT chk_client_role
     );
 
 -- ----------------------------------------------------------
+-- 19. users.all_orders_access — "Dirección Comercial" (migración 017).
+--     Cuando true, un asesor ve y trabaja pedidos de CUALQUIER vendedor
+--     (cubrir a un asesor ausente). El rol admin ya tiene esta cobertura.
+-- ----------------------------------------------------------
+ALTER TABLE users ADD COLUMN IF NOT EXISTS all_orders_access BOOLEAN NOT NULL DEFAULT false;
+
+-- ----------------------------------------------------------
 -- Función auxiliar: generar ID de pedido (ORD-00001)
 -- ----------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_generate_order_id()

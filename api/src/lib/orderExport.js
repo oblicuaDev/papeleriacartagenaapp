@@ -134,22 +134,25 @@ export async function buildXlsx(rows, sheetName = 'Pedidos') {
  * @param {object} cfg.order  fila de orders enriquecida con company/sucursal/client/advisor
  * @param {Array}  cfg.items  filas de order_items
  */
-export async function buildOrderDetailXlsx({ order, items }) {
+export async function buildOrderDetailXlsx({ order, items, plain = false }) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = COMPANY_NAME;
+  wb.creator = plain ? `Pedido ${order.id}` : COMPANY_NAME;
   wb.created = new Date();
   const ws = wb.addWorksheet(`Pedido ${order.id}`);
 
-  // ── Branded header con logo ───────────────────────────────
-  const logoRows = embedHeaderLogo(wb, ws, { rowSpan: 4 });
+  // ── Header ────────────────────────────────────────────────
+  // Modo `plain` (descarga del cliente): sin logo ni marca Papelería Cartagena.
+  const logoRows = plain ? 0 : embedHeaderLogo(wb, ws, { rowSpan: 4 });
 
-  ws.mergeCells('B1:F1');
-  ws.getCell('B1').value = COMPANY_NAME;
-  ws.getCell('B1').font = { bold: true, size: 18, color: { argb: 'FF1E40AF' } };
-  ws.getCell('B1').alignment = { vertical: 'middle' };
+  if (!plain) {
+    ws.mergeCells('B1:F1');
+    ws.getCell('B1').value = COMPANY_NAME;
+    ws.getCell('B1').font = { bold: true, size: 18, color: { argb: 'FF1E40AF' } };
+    ws.getCell('B1').alignment = { vertical: 'middle' };
+  }
 
   ws.mergeCells('B2:F2');
-  ws.getCell('B2').value = `ORDEN DE COMPRA — ${order.id}`;
+  ws.getCell('B2').value = `${plain ? 'PEDIDO' : 'ORDEN DE COMPRA'} — ${order.id}`;
   ws.getCell('B2').font = { bold: true, size: 13, color: { argb: 'FF111827' } };
 
   ws.mergeCells('B3:F3');

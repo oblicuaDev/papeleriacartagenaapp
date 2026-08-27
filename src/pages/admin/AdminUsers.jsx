@@ -19,7 +19,7 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-const EMPTY_FORM = { name: '', email: '', password: '', role: 'advisor', branchId: '', initials: '', active: true };
+const EMPTY_FORM = { name: '', email: '', password: '', role: 'advisor', branchId: '', initials: '', active: true, allOrdersAccess: false };
 
 const ROLE_META = {
   advisor:  { label: 'Asesor',     pillCls: 'bg-purple-100 text-purple-700' },
@@ -58,6 +58,7 @@ export default function AdminUsers() {
       branchId: user.branchId ?? '',
       initials: user.initials || '',
       active:   user.active,
+      allOrdersAccess: !!user.allOrdersAccess,
     });
     setError(null);
     setShowModal(true);
@@ -83,6 +84,7 @@ export default function AdminUsers() {
           branchId: form.branchId ? Number(form.branchId) : null,
           active:   form.active,
         };
+        if (editingUser.role === 'advisor') payload.allOrdersAccess = form.allOrdersAccess;
         if (form.password) payload.password = form.password;
         await usersApi.update(editingUser.id, payload);
       } else {
@@ -94,6 +96,7 @@ export default function AdminUsers() {
           branchId: form.branchId ? Number(form.branchId) : null,
           initials,
           active:   form.active,
+          allOrdersAccess: form.role === 'advisor' ? form.allOrdersAccess : false,
         });
       }
       await refreshUsers();
@@ -182,6 +185,11 @@ export default function AdminUsers() {
                         {u.initials}
                       </div>
                       <span className="text-sm font-medium text-gray-800">{u.name}</span>
+                      {u.allOrdersAccess && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">
+                          Cobertura total
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-5 py-4 text-sm text-gray-600">{u.email}</td>
@@ -282,6 +290,26 @@ export default function AdminUsers() {
               />
               <label htmlFor="userActive" className="text-sm text-gray-700">Usuario activo</label>
             </div>
+
+            {form.role === 'advisor' && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    id="allOrdersAccess"
+                    checked={form.allOrdersAccess}
+                    onChange={e => setForm(f => ({ ...f, allOrdersAccess: e.target.checked }))}
+                    className="rounded mt-0.5"
+                  />
+                  <label htmlFor="allOrdersAccess" className="text-sm text-gray-700">
+                    <span className="font-medium">Cobertura total (Dirección Comercial)</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">
+                      Ve y trabaja pedidos de todos los vendedores, no solo los suyos.
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
             {error && <p className="text-xs text-red-600">{error}</p>}
             <div className="flex gap-3 pt-2">
               <button

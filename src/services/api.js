@@ -168,6 +168,23 @@ export const ordersApi = {
   },
   getDownloadUrl: (oId, aId) => get(`/orders/${oId}/attachments/${aId}/download`),
   removeAttachment: (oId, aId) => del(`/orders/${oId}/attachments/${aId}`),
+
+  // Descarga del pedido para el cliente: PDF/Excel SIN marca Papelería Cartagena.
+  // Devuelve un Blob; la vista arma el enlace de descarga.
+  downloadPedido: async (oId, format /* 'pdf' | 'xlsx' */) => {
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/orders/${oId}/pedido.${format}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      let msg = `Descarga falló: HTTP ${res.status}`;
+      try { msg = (await res.json())?.error || msg; } catch { /* noop */ }
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    return res.blob();
+  },
 };
 
 // ── Contratos ───────────────────────────────────────────────

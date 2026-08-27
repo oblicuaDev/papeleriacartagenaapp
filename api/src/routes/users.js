@@ -11,7 +11,7 @@ const BCRYPT_ROUNDS = 12;
 const publicUserFields = `
   id, name, email, role, client_role, company_id, sucursal_id,
   branch_id, price_list_id, contact_name, phone, address, initials,
-  active, created_at
+  active, created_at, all_orders_access
 `;
 
 // GET /users
@@ -93,6 +93,7 @@ router.post('/', requireAdminOrSupervisor, async (req, res) => {
     name, email, password, role, clientRole,
     companyId, sucursalId, branchId,
     contactName, phone, address, active = true, initials,
+    allOrdersAccess = false,
   } = req.body;
 
   if (!name || !email || !password || !role) {
@@ -119,8 +120,9 @@ router.post('/', requireAdminOrSupervisor, async (req, res) => {
     const { rows } = await pool.query(
       `INSERT INTO users
          (name, email, password_hash, role, client_role, company_id, sucursal_id,
-          price_list_id, branch_id, contact_name, phone, address, initials, active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          price_list_id, branch_id, contact_name, phone, address, initials, active,
+          all_orders_access)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING ${publicUserFields}`,
       [
         name,
@@ -138,6 +140,7 @@ router.post('/', requireAdminOrSupervisor, async (req, res) => {
         address || null,
         initials || null,
         active,
+        role === 'advisor' ? !!allOrdersAccess : false,
       ]
     );
     return res.status(201).json(rows[0]);
@@ -170,6 +173,7 @@ router.put('/:id', async (req, res) => {
   const {
     name, email, password, clientRole, sucursalId,
     priceListId, branchId, contactName, phone, address, active,
+    allOrdersAccess,
   } = req.body;
 
   try {
@@ -185,6 +189,7 @@ router.put('/:id', async (req, res) => {
     if (phone       !== undefined) fields.push(`phone         = $${params.push(phone)}`);
     if (address     !== undefined) fields.push(`address       = $${params.push(address)}`);
     if (active      !== undefined && myRole === 'admin') fields.push(`active = $${params.push(active)}`);
+    if (allOrdersAccess !== undefined && myRole === 'admin') fields.push(`all_orders_access = $${params.push(!!allOrdersAccess)}`);
     if (password) {
       const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
       fields.push(`password_hash = $${params.push(hash)}`);

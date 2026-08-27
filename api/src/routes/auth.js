@@ -17,7 +17,8 @@ router.post('/login', async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, name, email, password_hash, role, client_role,
-              company_id, sucursal_id, price_list_id, branch_id, initials, active
+              company_id, sucursal_id, price_list_id, branch_id, initials, active,
+              all_orders_access
        FROM users WHERE email = $1`,
       [email.toLowerCase().trim()]
     );
@@ -41,6 +42,7 @@ router.post('/login', async (req, res) => {
       companyId:  user.company_id,
       sucursalId: user.sucursal_id,
       branchId:   user.branch_id,
+      allOrdersAccess: user.all_orders_access,
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {
@@ -60,6 +62,7 @@ router.post('/login', async (req, res) => {
         priceListId: user.price_list_id,
         branchId:    user.branch_id,
         initials:    user.initials,
+        allOrdersAccess: user.all_orders_access,
       },
     });
   } catch (err) {
@@ -80,7 +83,8 @@ router.get('/me', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, name, email, role, client_role, company_id,
-              sucursal_id, price_list_id, branch_id, initials, active
+              sucursal_id, price_list_id, branch_id, initials, active,
+              all_orders_access
        FROM users WHERE id = $1`,
       [req.user.id]
     );
@@ -99,6 +103,7 @@ router.get('/me', requireAuth, async (req, res) => {
       branchId:    user.branch_id,
       initials:    user.initials,
       active:      user.active,
+      allOrdersAccess: user.all_orders_access,
     });
   } catch (err) {
     console.error('me error:', err);

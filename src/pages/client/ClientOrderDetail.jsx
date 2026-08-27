@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   ArrowLeft, Package, FileText, Paperclip, MessageSquare,
   File, FileText as FilePdf, ImageIcon, Download, User, Calendar, Truck,
+  FileDown, Sheet,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -114,6 +115,25 @@ export default function ClientOrderDetail() {
     setDraft((prev) => prev.map((it) => (it.productId === productId ? { ...it, removed: !it.removed } : it)));
   }
 
+  const [downloading, setDownloading] = useState(null); // 'pdf' | 'xlsx' | null
+  async function handleDownload(format) {
+    setDownloading(format);
+    try {
+      const blob = await ordersApi.downloadPedido(order.id, format);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `pedido_${order.id}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      alert(err?.message || 'No se pudo descargar el pedido');
+    } finally {
+      setDownloading(null);
+    }
+  }
+
   const hasChanges = (() => {
     const orig = new Map((order?.items || []).map((it) => [it.productId, it]));
     return draft.some((it) => {
@@ -198,14 +218,35 @@ export default function ClientOrderDetail() {
   return (
     <div className="space-y-5">
 
-      {/* Back */}
-      <button
-        onClick={() => navigate('/cliente/pedidos')}
-        className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-700 transition font-medium"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Volver a mis pedidos
-      </button>
+      {/* Back + descargas */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <button
+          onClick={() => navigate('/cliente/pedidos')}
+          className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-700 transition font-medium"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Volver a mis pedidos
+        </button>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleDownload('pdf')}
+            disabled={downloading !== null}
+            className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 hover:border-red-300 disabled:opacity-50 disabled:cursor-wait transition"
+          >
+            <FileDown className="w-4 h-4" />
+            {downloading === 'pdf' ? 'Generando…' : 'Descargar pedido en PDF'}
+          </button>
+          <button
+            onClick={() => handleDownload('xlsx')}
+            disabled={downloading !== null}
+            className="flex items-center gap-2 px-4 py-2 border border-emerald-200 text-emerald-700 bg-emerald-50 rounded-lg text-sm font-medium hover:bg-emerald-100 hover:border-emerald-300 disabled:opacity-50 disabled:cursor-wait transition"
+          >
+            <Sheet className="w-4 h-4" />
+            {downloading === 'xlsx' ? 'Generando…' : 'Descargar pedido en EXCEL'}
+          </button>
+        </div>
+      </div>
 
       <div className="flex gap-5 items-start">
 

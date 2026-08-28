@@ -15,7 +15,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useApp } from "../context/AppContext";
 import QuantityInput from "./QuantityInput";
-import { ordersApi } from "../services/api";
+import { ordersApi, productsApi } from "../services/api";
 import {
   ArrowLeft,
   Truck,
@@ -39,7 +39,9 @@ import {
   ArrowRight,
   FileBadge,
 } from "lucide-react";
-import { STATUS_STYLES, ORDER_STATUSES, formatCOP, statusLabel, splitIva } from "../data/mockData";
+import { STATUS_STYLES, ORDER_STATUSES, formatCOP, statusLabel, aggregateOrderIva, ivaRateLabel } from "../data/mockData";
+
+const ITEM_EDITABLE_STATUSES = ["Borrador", "Pendiente por aprobar", "Pendiente", "Validar disponibilidad"];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -125,47 +127,73 @@ function handleDownloadAttachment(att) {
 function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
   const isAdvisor = currentUser?.role === "advisor";
   const isAdmin = currentUser?.role === "admin";
-  const canEdit = (isAdvisor || isAdmin) && order.status === "Validar disponibilidad";
+  const canEdit = (isAdvisor || isAdmin) && ITEM_EDITABLE_STATUSES.includes(order.status);
 
   const [editing, setEditing] = useState(false);
   const [localItems, setLocalItems] = useState(order.items || []);
   const [localTotal, setLocalTotal] = useState(order.total);
   const [localSubtotal, setLocalSubtotal] = useState(order.subtotal);
   const [localIva, setLocalIva] = useState(order.iva);
+  const [localIva5, setLocalIva5] = useState(order.iva5 ?? 0);
+  const [localIva19, setLocalIva19] = useState(order.iva19 ?? order.iva ?? 0);
+  const [localExento, setLocalExento] = useState(order.ivaExentoBase ?? 0);
   useEffect(() => {
     setLocalItems(order.items || []);
     setLocalTotal(order.total);
     setLocalSubtotal(order.subtotal);
     setLocalIva(order.iva);
+    setLocalIva5(order.iva5 ?? 0);
+    setLocalIva19(order.iva19 ?? order.iva ?? 0);
+    setLocalExento(order.ivaExentoBase ?? 0);
   }, [order.id]);
-  const [draft, setDraft] = useState(() =>
-    (order.items || []).map((it) => ({
-      productId: it.productId,
-      productName: it.productName,
-      unit: it.unit,
-      unitPrice: Number(it.unitPrice),
-      quantity: Number(it.quantity),
-      removed: false,
-    })),
-  );
+  const mapItem = (it) => ({
+    productId: it.productId,
+    productName: it.productName,
+    sku: it.sku,
+    unit: it.unit,
+    unitPrice: Number(it.unitPrice),
+    quantity: Number(it.quantity),
+    ivaRate: Number(it.ivaRate ?? 19),
+    removed: false,
+    added: false,
+  });
+  const [draft, setDraft] = useState(() => (order.items || []).map(mapItem));
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [errMsg, setErrMsg] = useState(null);
+  const [prodQuery, setProdQuery] = useState("");
+  const [prodResults, setProdResults] = useState([]);
 
   function startEdit() {
-    setDraft(
-      (localItems || []).map((it) => ({
-        productId: it.productId,
-        productName: it.productName,
-        unit: it.unit,
-        unitPrice: Number(it.unitPrice),
-        quantity: Number(it.quantity),
-        removed: false,
-      })),
-    );
+    setDraft((localItems || []).map(mapItem));
     setReason("");
+    setProdQuery("");
+    setProdResults([]);
     setErrMsg(null);
     setEditing(true);
+  }
+
+  useEffect(() => {
+    if (!editing || !prodQuery.trim()) { setProdResults([]); return; }
+    const t = setTimeout(() => {
+      productsApi.list({ search: prodQuery.trim(), limit: 15, active: true })
+        .then((r) => setProdResults(r?.data ?? []))
+        .catch(() => setProdResults([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [prodQuery, editing]);
+
+  function addDraftProduct(p) {
+    setDraft((prev) => {
+      if (prev.some((it) => it.productId === p.id && !it.removed)) return prev;
+      return [...prev, {
+        productId: p.id, productName: p.name, sku: p.sku, unit: p.unit,
+        unitPrice: Number(p.price) || 0, quantity: 1,
+        ivaRate: Number(p.ivaRate ?? p.iva_rate ?? 19), removed: false, added: true,
+      }];
+    });
+    setProdQuery("");
+    setProdResults([]);
   }
 
   function cancelEdit() {
@@ -182,15 +210,16 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
 
   function toggleRemove(productId) {
     setDraft((prev) =>
-      prev.map((it) =>
-        it.productId === productId ? { ...it, removed: !it.removed } : it,
-      ),
+      prev
+        .map((it) => (it.productId === productId ? { ...it, removed: !it.removed } : it))
+        .filter((it) => !(it.productId === productId && it.added && it.removed)),
     );
   }
 
   const hasChanges = (() => {
     const orig = new Map((localItems || []).map((it) => [it.productId, it]));
     return draft.some((it) => {
+      if (it.added && !it.removed) return true;
       const o = orig.get(it.productId);
       if (!o) return false;
       if (it.removed) return true;
@@ -199,11 +228,12 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
   })();
 
   const remaining = draft.filter((it) => !it.removed).length;
-  const projectedTotal = draft.reduce(
-    (s, it) => (it.removed ? s : s + it.unitPrice * it.quantity),
-    0,
+  const projected = aggregateOrderIva(
+    draft.filter((it) => !it.removed).map((it) => ({ lineTotal: it.unitPrice * it.quantity, ivaRate: it.ivaRate ?? 19 })),
   );
-  const { subtotal: projectedSubtotal, iva: projectedIva } = splitIva(projectedTotal);
+  const projectedTotal = projected.total;
+  const projectedSubtotal = projected.subtotal;
+  const projectedIva = projected.iva;
 
   async function save() {
     setErrMsg(null);
@@ -228,7 +258,7 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
         reason: reason.trim(),
       };
       const res = await ordersApi.updateItems(order.id, payload);
-      const newItems = draft
+      const newItems = res?.items ?? draft
         .filter((it) => !it.removed)
         .map((it) => ({
           productId: it.productId,
@@ -237,16 +267,22 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
           unit: it.unit,
           unitPrice: it.unitPrice,
           quantity: it.quantity,
+          ivaRate: it.ivaRate,
         }));
       const newTotal = res?.total ?? projectedTotal;
-      const fallbackSplit = splitIva(newTotal);
-      const newSubtotal = res?.subtotal ?? fallbackSplit.subtotal;
-      const newIva = res?.iva ?? fallbackSplit.iva;
+      const newSubtotal = res?.subtotal ?? projectedSubtotal;
+      const newIva = res?.iva ?? projectedIva;
       setLocalItems(newItems);
       setLocalTotal(newTotal);
       setLocalSubtotal(newSubtotal);
       setLocalIva(newIva);
-      onSaved && onSaved({ items: newItems, total: newTotal, subtotal: newSubtotal, iva: newIva });
+      setLocalIva5(res?.iva5 ?? projected.iva5);
+      setLocalIva19(res?.iva19 ?? projected.iva19);
+      setLocalExento(res?.ivaExentoBase ?? projected.exentoBase);
+      onSaved && onSaved({
+        items: newItems, total: newTotal, subtotal: newSubtotal, iva: newIva,
+        iva5: res?.iva5, iva19: res?.iva19, ivaExentoBase: res?.ivaExentoBase,
+      });
       await (refreshComments && refreshComments());
       setEditing(false);
     } catch (err) {
@@ -266,7 +302,7 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
             onClick={startEdit}
             className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition"
           >
-            Validar disponibilidad
+            {order.status === "Validar disponibilidad" ? "Validar disponibilidad" : "Modificar pedido"}
           </button>
         )}
       </div>
@@ -279,6 +315,7 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
               <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">Producto</th>
               <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">Unidad</th>
               <th className="text-center text-xs font-semibold text-gray-500 uppercase px-5 py-3">Cant.</th>
+              <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">IVA</th>
               <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Precio unit.</th>
               <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Total línea</th>
               {editing && <th className="px-5 py-3"></th>}
@@ -287,10 +324,11 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
           <tbody className="divide-y divide-gray-100">
             {!editing && (localItems || []).map((item, idx) => (
               <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{getSku(item.productId)}</td>
+                <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{item.sku || getSku(item.productId)}</td>
                 <td className="px-5 py-3 text-sm font-medium text-gray-800">{item.productName}</td>
                 <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                 <td className="px-5 py-3 text-sm text-gray-700 text-center">{item.quantity}</td>
+                <td className="px-5 py-3 text-sm text-gray-500 text-right">{ivaRateLabel(item.ivaRate ?? 19)}</td>
                 <td className="px-5 py-3 text-sm text-gray-700 text-right">{formatCOP(item.unitPrice)}</td>
                 <td className="px-5 py-3 text-sm font-semibold text-gray-800 text-right">
                   {formatCOP(item.unitPrice * item.quantity)}
@@ -299,10 +337,11 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
             ))}
 
             {editing && draft.map((item) => (
-              <tr key={item.productId} className={item.removed ? "bg-red-50" : "hover:bg-gray-50"}>
-                <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{getSku(item.productId)}</td>
+              <tr key={item.productId} className={item.removed ? "bg-red-50" : item.added ? "bg-emerald-50" : "hover:bg-gray-50"}>
+                <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{item.sku || getSku(item.productId)}</td>
                 <td className={`px-5 py-3 text-sm font-medium ${item.removed ? "line-through text-gray-400" : "text-gray-800"}`}>
                   {item.productName}
+                  {item.added && <span className="ml-2 text-[10px] font-semibold uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">nuevo</span>}
                 </td>
                 <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                 <td className="px-5 py-3 text-sm text-gray-700 text-center">
@@ -313,6 +352,7 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
                     onChange={(n) => setQty(item.productId, n)}
                   />
                 </td>
+                <td className="px-5 py-3 text-sm text-gray-500 text-right">{ivaRateLabel(item.ivaRate ?? 19)}</td>
                 <td className="px-5 py-3 text-sm text-gray-700 text-right">{formatCOP(item.unitPrice)}</td>
                 <td className={`px-5 py-3 text-sm font-semibold text-right ${item.removed ? "line-through text-gray-400" : "text-gray-800"}`}>
                   {formatCOP(item.unitPrice * item.quantity)}
@@ -333,35 +373,62 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
             ))}
           </tbody>
           <tfoot>
-            <tr className="border-t border-gray-100">
-              <td colSpan={5} className="px-5 py-1.5 text-sm text-gray-500 text-right">Subtotal</td>
-              <td className="px-5 py-1.5 text-sm text-gray-700 text-right">
-                {formatCOP(editing ? projectedSubtotal : localSubtotal)}
-              </td>
-              {editing && <td></td>}
-            </tr>
-            <tr>
-              <td colSpan={5} className="px-5 py-1.5 text-sm text-gray-500 text-right">IVA (19%)</td>
-              <td className="px-5 py-1.5 text-sm text-gray-700 text-right">
-                {formatCOP(editing ? projectedIva : localIva)}
-              </td>
-              {editing && <td></td>}
-            </tr>
-            <tr className="bg-gray-50 border-t-2 border-gray-200">
-              <td colSpan={5} className="px-5 py-3 text-sm font-bold text-gray-700 text-right">
-                TOTAL PEDIDO
-              </td>
-              <td className="px-5 py-3 text-base font-bold text-blue-700 text-right">
-                {formatCOP(editing ? projectedTotal : localTotal)}
-              </td>
-              {editing && <td></td>}
-            </tr>
+            {(() => {
+              const t = editing
+                ? projected
+                : { subtotal: localSubtotal, iva: localIva, total: localTotal, iva5: localIva5, iva19: localIva19, exentoBase: localExento };
+              const footRow = (label, value, bold) => (
+                <tr className={bold ? "bg-gray-50 border-t-2 border-gray-200" : ""}>
+                  <td colSpan={6} className={`px-5 ${bold ? "py-3 text-sm font-bold text-gray-700" : "py-1.5 text-sm text-gray-500"} text-right`}>{label}</td>
+                  <td className={`px-5 ${bold ? "py-3 text-base font-bold text-blue-700" : "py-1.5 text-sm text-gray-700"} text-right`}>{formatCOP(value)}</td>
+                  {editing && <td></td>}
+                </tr>
+              );
+              return (
+                <>
+                  {footRow("Subtotal", t.subtotal, false)}
+                  {t.exentoBase > 0 && footRow("Base exenta", t.exentoBase, false)}
+                  {t.iva5 > 0 && footRow("IVA (5%)", t.iva5, false)}
+                  {(t.iva19 > 0 || (t.iva5 === 0 && t.exentoBase === 0)) && footRow("IVA (19%)", t.iva19, false)}
+                  {footRow("TOTAL PEDIDO", t.total, true)}
+                </>
+              );
+            })()}
           </tfoot>
         </table>
       </div>
 
       {editing && (
         <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Agregar un producto</label>
+            <input
+              value={prodQuery}
+              onChange={(e) => setProdQuery(e.target.value)}
+              placeholder="Buscar por nombre o SKU…"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {prodResults.length > 0 && (
+              <div className="mt-1 border border-gray-200 rounded-lg bg-white max-h-44 overflow-y-auto">
+                {prodResults.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => addDraftProduct(p)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 transition"
+                  >
+                    <span className="truncate">
+                      <span className="font-mono text-xs text-gray-400 mr-2">{p.sku}</span>{p.name}
+                    </span>
+                    <span className="text-xs text-gray-500 whitespace-nowrap">
+                      {formatCOP(p.price)} · {ivaRateLabel(p.ivaRate ?? p.iva_rate ?? 19)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-gray-400 mt-1">El precio final de los productos agregados lo confirma el sistema al guardar.</p>
+          </div>
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">
               Motivo de la modificacion <span className="text-red-500">*</span>

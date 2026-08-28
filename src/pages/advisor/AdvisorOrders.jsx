@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2, Building, Wallet, Receipt, DollarSign, UserCog } from 'lucide-react';
+import { Eye, ClipboardList, CheckCircle, Box, CalendarDays, X, Settings2, Building, Wallet, Receipt, DollarSign, UserCog, Percent } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -264,11 +264,14 @@ export default function AdvisorOrders() {
         />
       </div>
 
-      {/* Subtotal / IVA / Total del periodo seleccionado */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard label="Subtotal Pedidos"  value={formatCOP(stats?.mySubtotal ?? 0)} icon={Wallet}     color="bg-emerald-500" />
-        <StatCard label="IVA Pedidos (19%)" value={formatCOP(stats?.myIva ?? 0)}      icon={Receipt}    color="bg-amber-500"   />
-        <StatCard label="Total Pedidos"     value={formatCOP(stats?.myRevenue ?? 0)}  icon={DollarSign} color="bg-blue-600"    />
+      {/* Subtotal / IVA discriminado / Total del periodo seleccionado */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatCard label="Subtotal"    value={formatCOP(stats?.mySubtotal ?? 0)}    icon={Wallet}     color="bg-emerald-500" />
+        <StatCard label="IVA 19%"     value={formatCOP(stats?.myIva19 ?? 0)}       icon={Percent}    color="bg-amber-500"   />
+        <StatCard label="IVA 5%"      value={formatCOP(stats?.myIva5 ?? 0)}        icon={Percent}    color="bg-amber-400"   />
+        <StatCard label="Base exenta" value={formatCOP(stats?.myExentoBase ?? 0)}  icon={Receipt}    color="bg-slate-400"   />
+        <StatCard label="IVA total"   value={formatCOP(stats?.myIva ?? 0)}         icon={Receipt}    color="bg-orange-500"  />
+        <StatCard label="Total"       value={formatCOP(stats?.myRevenue ?? 0)}     icon={DollarSign} color="bg-blue-600"    />
       </div>
 
       {/* Filter Tabs */}

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, Trash2, CheckCircle, ArrowLeft, FileText } from 'lucide-react';
+import { ShoppingCart, Trash2, CheckCircle, ArrowLeft, FileText, Save } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import QuantityInput from '../../components/QuantityInput';
@@ -9,11 +9,28 @@ import { formatCOP } from '../../data/mockData';
 export default function ClientConfirmOrder() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { cart, cartTotal, cartSubtotal, cartIva, updateCartItem, removeFromCart, submitOrder, refreshProducts } = useApp();
+  const {
+    cart, cartTotal, cartSubtotal, cartIva, cartIva5, cartIva19, cartExentoBase,
+    updateCartItem, removeFromCart, submitOrder, refreshProducts,
+  } = useApp();
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
+
+  async function handleSaveDraft() {
+    setErrorMsg(null);
+    setSavingDraft(true);
+    try {
+      await submitOrder(currentUser.id, null, notes, { draft: true });
+      navigate('/cliente/pedidos');
+    } catch (err) {
+      setErrorMsg(err?.message || 'No se pudo guardar el borrador');
+    } finally {
+      setSavingDraft(false);
+    }
+  }
 
   async function handleSubmit() {
     setErrorMsg(null);
@@ -145,10 +162,24 @@ export default function ClientConfirmOrder() {
             <span className="text-sm text-gray-500">Subtotal</span>
             <span className="text-sm font-medium text-gray-700">{formatCOP(cartSubtotal)}</span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-500">IVA (19%)</span>
-            <span className="text-sm font-medium text-gray-700">{formatCOP(cartIva)}</span>
-          </div>
+          {cartExentoBase > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">Base exenta</span>
+              <span className="text-sm font-medium text-gray-700">{formatCOP(cartExentoBase)}</span>
+            </div>
+          )}
+          {cartIva5 > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">IVA (5%)</span>
+              <span className="text-sm font-medium text-gray-700">{formatCOP(cartIva5)}</span>
+            </div>
+          )}
+          {(cartIva19 > 0 || (cartIva5 === 0 && cartExentoBase === 0)) && (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">IVA (19%)</span>
+              <span className="text-sm font-medium text-gray-700">{formatCOP(cartIva19)}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between pt-1.5 border-t border-gray-200">
             <span className="text-sm font-semibold text-gray-700">TOTAL PEDIDO</span>
             <span className="text-2xl font-bold text-gray-900">{formatCOP(cartTotal)}</span>
@@ -177,14 +208,24 @@ export default function ClientConfirmOrder() {
         </div>
       )}
 
-      {/* Submit */}
-      <button
-        onClick={handleSubmit}
-        disabled={submitting}
-        className="w-full py-4 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-300 text-white rounded-xl text-base font-bold transition shadow-sm"
-      >
-        {submitting ? 'Enviando...' : 'Enviar mi pedido'}
-      </button>
+      {/* Acciones */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <button
+          onClick={handleSaveDraft}
+          disabled={submitting || savingDraft}
+          className="sm:w-56 flex items-center justify-center gap-2 py-4 border border-gray-300 text-gray-700 rounded-xl text-base font-semibold hover:bg-gray-50 disabled:opacity-50 transition"
+        >
+          <Save className="w-4 h-4" />
+          {savingDraft ? 'Guardando...' : 'Guardar borrador'}
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={submitting || savingDraft}
+          className="flex-1 py-4 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-300 text-white rounded-xl text-base font-bold transition shadow-sm"
+        >
+          {submitting ? 'Enviando...' : 'Enviar mi pedido'}
+        </button>
+      </div>
     </div>
   );
 }

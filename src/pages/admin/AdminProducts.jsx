@@ -20,7 +20,7 @@ import * as XLSX from "xlsx";
 import productFallback from "../../product.webp";
 import { useApp } from "../../context/AppContext";
 import { productsApi } from "../../services/api";
-import { formatCOP } from "../../data/mockData";
+import { formatCOP, ivaRateLabel } from "../../data/mockData";
 
 const UNITS = ["Unidad", "Resma", "Caja", "Paquete", "Pliego", "Set", "Rollo"];
 
@@ -63,6 +63,7 @@ function parseExcelRows(workbook, categories) {
     );
     const stockRaw = get("stock", "inventario", "cantidad");
     const unitRaw = get("unidad", "unit", "unidad de medida");
+    const ivaRaw = get("iva", "tax", "impuesto");
 
     const basePrice =
       parseFloat(String(basePriceRaw).replace(/[^0-9.]/g, "")) || 0;
@@ -70,6 +71,11 @@ function parseExcelRows(workbook, categories) {
     const unit =
       UNITS.find((u) => u.toLowerCase() === unitRaw.toLowerCase()) || "Unidad";
     const categoryId = catMap[categoryRaw.toLowerCase().trim()] || null;
+    // IVA opcional: por defecto 19. Acepta "0", "exento", "5", "19", "19%".
+    const ivaNum = /exent/i.test(ivaRaw)
+      ? 0
+      : parseInt(String(ivaRaw).replace(/[^0-9]/g, ""), 10);
+    const ivaRate = ivaRaw === "" || Number.isNaN(ivaNum) ? 19 : ivaNum;
 
     const errors = [];
     if (!sku) errors.push("SKU requerido");
@@ -77,6 +83,8 @@ function parseExcelRows(workbook, categories) {
     if (!categoryId) errors.push(`Categoría "${categoryRaw}" no encontrada`);
     if (basePriceRaw === "" || basePrice < 0)
       errors.push("Precio base inválido");
+    if (![0, 5, 19].includes(ivaRate))
+      errors.push(`IVA "${ivaRaw}" inválido (usa 0, 5 o 19)`);
 
     return {
       _row: i + 2,
@@ -88,6 +96,7 @@ function parseExcelRows(workbook, categories) {
       basePrice,
       stock,
       unit,
+      ivaRate,
       errors,
     };
   });
@@ -99,6 +108,7 @@ const EMPTY_FORM = {
   categoryId: "",
   description: "",
   basePrice: "",
+  ivaRate: 19,
   stock: "",
   unit: "Unidad",
   active: true,
@@ -176,6 +186,7 @@ export default function AdminProducts() {
       categoryId: String(product.categoryId),
       description: product.description,
       basePrice: String(product.basePrice),
+      ivaRate: Number(product.ivaRate ?? 19),
       stock: String(product.stock),
       unit: product.unit,
       active: product.active,
@@ -225,6 +236,7 @@ export default function AdminProducts() {
       categoryId: Number(form.categoryId),
       description: form.description,
       basePrice: Number(form.basePrice),
+      ivaRate: Number(form.ivaRate),
       stock: Number(form.stock),
       unit: form.unit,
       active: form.active,
@@ -318,6 +330,7 @@ export default function AdminProducts() {
           basePrice: r.basePrice,
           stock: r.stock,
           unit: r.unit,
+          ivaRate: r.ivaRate,
           active: true,
           complementaryIds: [],
         });
@@ -494,6 +507,9 @@ export default function AdminProducts() {
                   Precio Base
                 </th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">
+                  IVA
+                </th>
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">
                   Stock
                 </th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-4 py-3">
@@ -539,6 +555,9 @@ export default function AdminProducts() {
                   </td>
                   <td className="px-4 py-3 text-sm font-medium text-gray-800">
                     {formatCOP(product.basePrice)}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-500">
+                    {ivaRateLabel(product.ivaRate ?? 19)}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">
                     {product.stock}
@@ -757,7 +776,7 @@ export default function AdminProducts() {
                 placeholder="Descripción del producto"
               />
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
                 <label className={labelClass}>Precio Base (COP) *</label>
                 <input
@@ -769,6 +788,20 @@ export default function AdminProducts() {
                   }
                   placeholder="0"
                 />
+              </div>
+              <div>
+                <label className={labelClass}>IVA</label>
+                <select
+                  className={inputClass}
+                  value={form.ivaRate}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, ivaRate: Number(e.target.value) }))
+                  }
+                >
+                  <option value={19}>19%</option>
+                  <option value={5}>5%</option>
+                  <option value={0}>Exento (0%)</option>
+                </select>
               </div>
               <div>
                 <label className={labelClass}>Stock</label>

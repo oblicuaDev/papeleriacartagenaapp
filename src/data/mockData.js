@@ -145,6 +145,7 @@ export const ORDER_STATUSES = ['Pendiente', 'Validar disponibilidad', 'Alistamie
 
 // Label visible al usuario (estado interno → texto en UI)
 export const STATUS_LABELS = {
+  'Borrador':              'Borrador',
   'Pendiente por aprobar': 'Pendiente por aprobar',
   'Pendiente':             'Aprobado',
   'Rechazado':             'Rechazado',
@@ -159,6 +160,7 @@ export function statusLabel(status) {
 }
 
 export const STATUS_STYLES = {
+  'Borrador': { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200' },
   'Pendiente por aprobar': { bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-200' },
   'Pendiente': { bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-200' },
   'Rechazado': { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200' },
@@ -279,14 +281,53 @@ export function formatCOP(amount) {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(amount);
 }
 
-// Discrimina IVA (19%) de un monto que ya lo incluye. Solo para preview
-// client-side antes de que el pedido exista en backend (carrito) — una
-// vez el pedido esta creado, usar siempre order.subtotal/order.iva
+// Discrimina IVA de un monto que ya lo incluye. Solo para preview client-side
+// antes de que el pedido exista en backend (carrito) — una vez el pedido esta
+// creado, usar siempre order.subtotal/order.iva/order.iva5/order.iva19
 // persistidos, nunca recalcular para evitar divergencia con lo cobrado.
-export const IVA_RATE = 0.19;
+export const IVA_RATES = [0, 5, 19];
+export const IVA_RATE = 0.19; // compat
+
+function _round2(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+// `total` incluye IVA a la tasa `rate` (%). -> { subtotal, iva }, subtotal+iva===total.
+export function splitIvaRate(total, rate = 19) {
+  const t = Number(total);
+  const r = (Number(rate) || 0) / 100;
+  const subtotal = _round2(t / (1 + r));
+  const iva = _round2(t - subtotal);
+  return { subtotal, iva };
+}
 
 export function splitIva(total) {
-  const subtotal = Math.round((Number(total) / (1 + IVA_RATE)) * 100) / 100;
-  const iva = Math.round((Number(total) - subtotal) * 100) / 100;
-  return { subtotal, iva };
+  return splitIvaRate(total, 19);
+}
+
+// Agrega lineas [{ lineTotal, ivaRate }] -> totales del pedido + desglose por tasa.
+// Garantiza iva5 + iva19 === iva y subtotal + iva === total.
+export function aggregateOrderIva(lines) {
+  let total = 0;
+  let iva5 = 0;
+  let iva19 = 0;
+  let exentoBase = 0;
+  for (const l of lines) {
+    const lt = _round2(l.lineTotal);
+    const rate = Number(l.ivaRate) || 0;
+    total = _round2(total + lt);
+    if (rate === 5) iva5 = _round2(iva5 + splitIvaRate(lt, 5).iva);
+    else if (rate === 19) iva19 = _round2(iva19 + splitIvaRate(lt, 19).iva);
+    else exentoBase = _round2(exentoBase + lt);
+  }
+  const iva = _round2(iva5 + iva19);
+  const subtotal = _round2(total - iva);
+  return { total, subtotal, iva, iva5, iva19, exentoBase };
+}
+
+// Etiqueta corta de tasa para tablas.
+export function ivaRateLabel(rate) {
+  const r = Number(rate);
+  if (r === 0) return 'Exento';
+  return `${r % 1 === 0 ? r : r.toFixed(1)}%`;
 }

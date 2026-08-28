@@ -8,11 +8,11 @@ import {
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import QuantityInput from '../../components/QuantityInput';
-import { ordersApi } from '../../services/api';
-import { STATUS_STYLES, formatCOP, splitIva } from '../../data/mockData';
+import { ordersApi, catalogApi } from '../../services/api';
+import { STATUS_STYLES, formatCOP, aggregateOrderIva, ivaRateLabel } from '../../data/mockData';
 
 // Estados en los que el pedido todavia se puede editar (antes de Alistamiento).
-const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente', 'Validar disponibilidad'];
+const ITEM_EDITABLE_STATUSES = ['Borrador', 'Pendiente por aprobar', 'Pendiente', 'Validar disponibilidad'];
 
 function fileIcon(type = '') {
   if (type.startsWith('image/')) return <ImageIcon className="w-4 h-4 text-blue-500" />;
@@ -83,6 +83,11 @@ export default function ClientOrderDetail() {
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
+  const [prodQuery, setProdQuery] = useState('');
+  const [prodResults, setProdResults] = useState([]);
+  const [confirmingDraft, setConfirmingDraft] = useState(false);
+
+  const isDraft = order?.status === 'Borrador';
 
   function startEdit() {
     setDraft(
@@ -93,10 +98,14 @@ export default function ClientOrderDetail() {
         unit: it.unit,
         unitPrice: Number(it.unitPrice),
         quantity: Number(it.quantity),
+        ivaRate: Number(it.ivaRate ?? 19),
         removed: false,
+        added: false,
       }))
     );
     setReason('');
+    setProdQuery('');
+    setProdResults([]);
     setSaveError(null);
     setEditing(true);
   }
@@ -106,13 +115,68 @@ export default function ClientOrderDetail() {
     setSaveError(null);
   }
 
+  // Buscador de productos para agregar (usa el catalogo del cliente: precio + IVA reales).
+  useEffect(() => {
+    if (!editing || !prodQuery.trim()) { setProdResults([]); return; }
+    const t = setTimeout(() => {
+      catalogApi.list({ search: prodQuery.trim(), limit: 15 })
+        .then((r) => setProdResults(r?.data ?? []))
+        .catch(() => setProdResults([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [prodQuery, editing]);
+
+  function addDraftProduct(p) {
+    setDraft((prev) => {
+      if (prev.some((it) => it.productId === p.id && !it.removed)) return prev;
+      return [
+        ...prev,
+        {
+          productId: p.id, productName: p.name, sku: p.sku, unit: p.unit,
+          unitPrice: Number(p.price) || 0, quantity: 1,
+          ivaRate: Number(p.ivaRate ?? 19), removed: false, added: true,
+        },
+      ];
+    });
+    setProdQuery('');
+    setProdResults([]);
+  }
+
   function setQty(productId, qty) {
     const n = Math.max(1, Math.trunc(Number(qty) || 0));
     setDraft((prev) => prev.map((it) => (it.productId === productId ? { ...it, quantity: n } : it)));
   }
 
   function toggleRemove(productId) {
-    setDraft((prev) => prev.map((it) => (it.productId === productId ? { ...it, removed: !it.removed } : it)));
+    setDraft((prev) =>
+      prev
+        .map((it) => (it.productId === productId ? { ...it, removed: !it.removed } : it))
+        // un producto recién agregado se quita del todo
+        .filter((it) => !(it.productId === productId && it.added && it.removed))
+    );
+  }
+
+  async function handleConfirmDraft() {
+    setConfirmingDraft(true);
+    try {
+      await ordersApi.confirmDraft(order.id);
+      const full = await ordersApi.get(order.id);
+      setOrder(full);
+    } catch (err) {
+      alert(err?.message || 'No se pudo confirmar el pedido');
+    } finally {
+      setConfirmingDraft(false);
+    }
+  }
+
+  async function handleDeleteDraft() {
+    if (!window.confirm('¿Eliminar este borrador? No se puede deshacer.')) return;
+    try {
+      await ordersApi.remove(order.id);
+      navigate('/cliente/pedidos');
+    } catch (err) {
+      alert(err?.message || 'No se pudo eliminar el borrador');
+    }
   }
 
   const [downloading, setDownloading] = useState(null); // 'pdf' | 'xlsx' | null
@@ -137,6 +201,7 @@ export default function ClientOrderDetail() {
   const hasChanges = (() => {
     const orig = new Map((order?.items || []).map((it) => [it.productId, it]));
     return draft.some((it) => {
+      if (it.added && !it.removed) return true;
       const o = orig.get(it.productId);
       if (!o) return false;
       if (it.removed) return true;
@@ -145,8 +210,12 @@ export default function ClientOrderDetail() {
   })();
 
   const remaining = draft.filter((it) => !it.removed).length;
-  const projectedTotal = draft.reduce((s, it) => (it.removed ? s : s + it.unitPrice * it.quantity), 0);
-  const { subtotal: projectedSubtotal, iva: projectedIva } = splitIva(projectedTotal);
+  const projected = aggregateOrderIva(
+    draft.filter((it) => !it.removed).map((it) => ({ lineTotal: it.unitPrice * it.quantity, ivaRate: it.ivaRate ?? 19 })),
+  );
+  const projectedTotal = projected.total;
+  const projectedSubtotal = projected.subtotal;
+  const projectedIva = projected.iva;
 
   async function saveEdit() {
     setSaveError(null);
@@ -169,24 +238,15 @@ export default function ClientOrderDetail() {
         reason: reason.trim(),
       };
       const res = await ordersApi.updateItems(order.id, payload);
-      const newItems = draft
-        .filter((it) => !it.removed)
-        .map((it) => ({
-          productId: it.productId,
-          productName: it.productName,
-          sku: it.sku,
-          unit: it.unit,
-          unitPrice: it.unitPrice,
-          quantity: it.quantity,
-        }));
-      const newTotal = res?.total ?? projectedTotal;
-      const fallback = splitIva(newTotal);
       setOrder((prev) => ({
         ...prev,
-        items: newItems,
-        total: newTotal,
-        subtotal: res?.subtotal ?? fallback.subtotal,
-        iva: res?.iva ?? fallback.iva,
+        items: res?.items ?? prev.items,
+        total: res?.total ?? projectedTotal,
+        subtotal: res?.subtotal ?? projectedSubtotal,
+        iva: res?.iva ?? projectedIva,
+        iva5: res?.iva5 ?? prev.iva5,
+        iva19: res?.iva19 ?? prev.iva19,
+        ivaExentoBase: res?.ivaExentoBase ?? prev.ivaExentoBase,
       }));
       setEditing(false);
     } catch (err) {
@@ -248,6 +308,30 @@ export default function ClientOrderDetail() {
         </div>
       </div>
 
+      {isDraft && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+          <div className="text-sm text-amber-800">
+            <p className="font-semibold">Este pedido es un borrador.</p>
+            <p className="text-xs mt-0.5">Todavía no se ha enviado. Puedes seguir editándolo y confirmarlo cuando esté listo.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDeleteDraft}
+              className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg font-medium transition"
+            >
+              Eliminar borrador
+            </button>
+            <button
+              onClick={handleConfirmDraft}
+              disabled={confirmingDraft}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold disabled:opacity-50 transition"
+            >
+              {confirmingDraft ? 'Confirmando...' : 'Confirmar pedido'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex gap-5 items-start">
 
         {/* ── Main content ─────────────────────────────────────── */}
@@ -284,7 +368,13 @@ export default function ClientOrderDetail() {
               </div>
               <div className="text-right">
                 <p className="text-xs text-gray-400">Subtotal {formatCOP(order.subtotal)}</p>
-                <p className="text-xs text-gray-400 mb-1">IVA (19%) {formatCOP(order.iva)}</p>
+                {(order.ivaExentoBase ?? 0) > 0 && (
+                  <p className="text-xs text-gray-400">Base exenta {formatCOP(order.ivaExentoBase)}</p>
+                )}
+                {(order.iva5 ?? 0) > 0 && (
+                  <p className="text-xs text-gray-400">IVA (5%) {formatCOP(order.iva5)}</p>
+                )}
+                <p className="text-xs text-gray-400 mb-1">IVA (19%) {formatCOP(order.iva19 ?? order.iva)}</p>
                 <p className="text-xs text-gray-400 mb-1">Total Pedido</p>
                 <p className="text-3xl font-bold text-blue-700">{formatCOP(order.total)}</p>
               </div>
@@ -313,6 +403,7 @@ export default function ClientOrderDetail() {
                     <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">Producto</th>
                     <th className="text-left text-xs font-semibold text-gray-500 uppercase px-5 py-3">Unidad</th>
                     <th className="text-center text-xs font-semibold text-gray-500 uppercase px-5 py-3">Cant.</th>
+                    <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">IVA</th>
                     <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Precio unit.</th>
                     <th className="text-right text-xs font-semibold text-gray-500 uppercase px-5 py-3">Total línea</th>
                     {editing && <th className="px-5 py-3"></th>}
@@ -325,15 +416,17 @@ export default function ClientOrderDetail() {
                       <td className="px-5 py-3 text-sm font-medium text-gray-800">{item.productName}</td>
                       <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                       <td className="px-5 py-3 text-sm text-gray-700 text-center">{item.quantity}</td>
+                      <td className="px-5 py-3 text-sm text-gray-500 text-right">{ivaRateLabel(item.ivaRate ?? 19)}</td>
                       <td className="px-5 py-3 text-sm text-gray-700 text-right">{formatCOP(item.unitPrice)}</td>
                       <td className="px-5 py-3 text-sm font-semibold text-gray-800 text-right">{formatCOP(item.unitPrice * item.quantity)}</td>
                     </tr>
                   ))}
                   {editing && draft.map((item) => (
-                    <tr key={item.productId} className={item.removed ? 'bg-red-50' : 'hover:bg-gray-50'}>
+                    <tr key={item.productId} className={item.removed ? 'bg-red-50' : item.added ? 'bg-emerald-50' : 'hover:bg-gray-50'}>
                       <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{item.sku || '—'}</td>
                       <td className={`px-5 py-3 text-sm font-medium ${item.removed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
                         {item.productName}
+                        {item.added && <span className="ml-2 text-[10px] font-semibold uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">nuevo</span>}
                       </td>
                       <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                       <td className="px-5 py-3 text-sm text-gray-700 text-center">
@@ -344,6 +437,7 @@ export default function ClientOrderDetail() {
                           onChange={(n) => setQty(item.productId, n)}
                         />
                       </td>
+                      <td className="px-5 py-3 text-sm text-gray-500 text-right">{ivaRateLabel(item.ivaRate ?? 19)}</td>
                       <td className="px-5 py-3 text-sm text-gray-700 text-right">{formatCOP(item.unitPrice)}</td>
                       <td className={`px-5 py-3 text-sm font-semibold text-right ${item.removed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
                         {formatCOP(item.unitPrice * item.quantity)}
@@ -362,33 +456,63 @@ export default function ClientOrderDetail() {
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t border-gray-100">
-                    <td colSpan={5} className="px-5 py-1.5 text-sm text-gray-500 text-right">Subtotal</td>
-                    <td className="px-5 py-1.5 text-sm text-gray-700 text-right">
-                      {formatCOP(editing ? projectedSubtotal : order.subtotal)}
-                    </td>
-                    {editing && <td></td>}
-                  </tr>
-                  <tr>
-                    <td colSpan={5} className="px-5 py-1.5 text-sm text-gray-500 text-right">IVA (19%)</td>
-                    <td className="px-5 py-1.5 text-sm text-gray-700 text-right">
-                      {formatCOP(editing ? projectedIva : order.iva)}
-                    </td>
-                    {editing && <td></td>}
-                  </tr>
-                  <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={5} className="px-5 py-3 text-sm font-bold text-gray-700 text-right">TOTAL PEDIDO</td>
-                    <td className="px-5 py-3 text-base font-bold text-blue-700 text-right">
-                      {formatCOP(editing ? projectedTotal : order.total)}
-                    </td>
-                    {editing && <td></td>}
-                  </tr>
+                  {(() => {
+                    const t = editing ? projected : {
+                      subtotal: order.subtotal, iva: order.iva, total: order.total,
+                      iva5: order.iva5 ?? 0, iva19: order.iva19 ?? order.iva ?? 0,
+                      exentoBase: order.ivaExentoBase ?? 0,
+                    };
+                    const footRow = (label, value, bold) => (
+                      <tr className={bold ? 'bg-gray-50 border-t-2 border-gray-200' : ''}>
+                        <td colSpan={6} className={`px-5 ${bold ? 'py-3 text-sm font-bold text-gray-700' : 'py-1.5 text-sm text-gray-500'} text-right`}>{label}</td>
+                        <td className={`px-5 ${bold ? 'py-3 text-base font-bold text-blue-700' : 'py-1.5 text-sm text-gray-700'} text-right`}>{formatCOP(value)}</td>
+                        {editing && <td></td>}
+                      </tr>
+                    );
+                    return (
+                      <>
+                        {footRow('Subtotal', t.subtotal, false)}
+                        {t.exentoBase > 0 && footRow('Base exenta', t.exentoBase, false)}
+                        {t.iva5 > 0 && footRow('IVA (5%)', t.iva5, false)}
+                        {(t.iva19 > 0 || (t.iva5 === 0 && t.exentoBase === 0)) && footRow('IVA (19%)', t.iva19, false)}
+                        {footRow('TOTAL PEDIDO', t.total, true)}
+                      </>
+                    );
+                  })()}
                 </tfoot>
               </table>
             </div>
 
             {editing && (
               <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Agregar un producto</label>
+                  <input
+                    value={prodQuery}
+                    onChange={(e) => setProdQuery(e.target.value)}
+                    placeholder="Buscar por nombre o SKU…"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {prodResults.length > 0 && (
+                    <div className="mt-1 border border-gray-200 rounded-lg bg-white max-h-44 overflow-y-auto">
+                      {prodResults.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => addDraftProduct(p)}
+                          className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 transition"
+                        >
+                          <span className="truncate">
+                            <span className="font-mono text-xs text-gray-400 mr-2">{p.sku}</span>{p.name}
+                          </span>
+                          <span className="text-xs text-gray-500 whitespace-nowrap">
+                            {formatCOP(p.price)} · {ivaRateLabel(p.ivaRate ?? 19)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">
                     Motivo de la modificación <span className="text-red-500">*</span>

@@ -13,7 +13,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import pool from '../config/db.js';
 import { uploadBuffer } from './storage.js';
-import { splitIva } from './iva.js';
+import { aggregateOrderIva, ivaRateLabel } from './iva.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -66,7 +66,7 @@ export async function loadOrderContext(orderId, db = pool) {
   if (!orderRows[0]) throw new Error(`Pedido ${orderId} no encontrado`);
 
   const { rows: items } = await db.query(
-    `SELECT product_name, sku, quantity, unit_price, unit
+    `SELECT product_name, sku, quantity, unit_price, unit, iva_rate
        FROM order_items
       WHERE order_id = $1
       ORDER BY id`,
@@ -162,16 +162,17 @@ export function renderPdfBuffer({ order, items, plain = false }) {
     doc.moveTo(50, doc.y).lineTo(562, doc.y).strokeColor('#cccccc').stroke();
     doc.moveDown(0.3);
 
-    const colX = { sku: 50, name: 130, qty: 360, price: 410, total: 490 };
-    const colW = { sku: 70, name: 220, qty: 40, price: 70, total: 70 };
+    const colX = { sku: 50, name: 118, qty: 315, iva: 350, price: 398, total: 478 };
+    const colW = { sku: 64, name: 190, qty: 30, iva: 42, price: 76, total: 84 };
 
     let y = doc.y;
     doc.font('Helvetica-Bold').fontSize(9);
     doc.text('SKU', colX.sku, y, { width: colW.sku });
     doc.text('Producto', colX.name, y, { width: colW.name });
     doc.text('Cant', colX.qty, y, { width: colW.qty, align: 'right' });
+    doc.text('IVA', colX.iva, y, { width: colW.iva, align: 'right' });
     doc.text('P. Unit', colX.price, y, { width: colW.price, align: 'right' });
-    doc.text('Subtotal', colX.total, y, { width: colW.total, align: 'right' });
+    doc.text('Total', colX.total, y, { width: colW.total, align: 'right' });
     y += 14;
     doc.moveTo(50, y).lineTo(562, y).strokeColor('#999999').stroke();
     y += 4;
@@ -179,8 +180,8 @@ export function renderPdfBuffer({ order, items, plain = false }) {
     doc.font('Helvetica').fontSize(9);
     let computedTotal = 0;
     for (const it of items) {
-      const subtotal = Number(it.unit_price) * Number(it.quantity);
-      computedTotal += subtotal;
+      const lineTotal = Number(it.unit_price) * Number(it.quantity);
+      computedTotal += lineTotal;
 
       // Saltar de pagina si quedamos sin espacio
       if (y > 700) {
@@ -191,37 +192,44 @@ export function renderPdfBuffer({ order, items, plain = false }) {
       doc.text(it.sku ?? '', colX.sku, y, { width: colW.sku });
       doc.text(it.product_name, colX.name, y, { width: colW.name });
       doc.text(String(it.quantity), colX.qty, y, { width: colW.qty, align: 'right' });
+      doc.text(ivaRateLabel(it.iva_rate ?? 19), colX.iva, y, { width: colW.iva, align: 'right' });
       doc.text(formatCOP(it.unit_price), colX.price, y, { width: colW.price, align: 'right' });
-      doc.text(formatCOP(subtotal), colX.total, y, { width: colW.total, align: 'right' });
+      doc.text(formatCOP(lineTotal), colX.total, y, { width: colW.total, align: 'right' });
 
       // Avanzar segun la altura del nombre (puede ocupar varias lineas)
       const lineCount = Math.max(1, Math.ceil(doc.widthOfString(it.product_name) / colW.name));
       y += 14 * lineCount;
     }
 
-    // ── Subtotal / IVA / Total ─────────────────────────────
-    const orderTotal = order.total ?? computedTotal;
-    const { subtotal: fallbackSubtotal, iva: fallbackIva } = splitIva(orderTotal);
-    const subtotalVal = order.subtotal ?? fallbackSubtotal;
-    const ivaVal = order.iva ?? fallbackIva;
+    // ── Subtotal / IVA por tasa / Total ───────────────────────
+    const orderTotal = Number(order.total ?? computedTotal);
+    const agg = aggregateOrderIva(items.map(it => ({
+      lineTotal: Number(it.unit_price) * Number(it.quantity),
+      ivaRate: Number(it.iva_rate ?? 19),
+    })));
+    const subtotalVal = order.subtotal != null ? Number(order.subtotal) : agg.subtotal;
+    const iva19Val = order.iva_19 != null ? Number(order.iva_19) : agg.iva19;
+    const iva5Val = order.iva_5 != null ? Number(order.iva_5) : agg.iva5;
+    const exentoVal = order.iva_exento_base != null ? Number(order.iva_exento_base) : agg.exentoBase;
 
     y += 8;
     doc.moveTo(360, y).lineTo(562, y).strokeColor('#000000').stroke();
     y += 6;
 
-    doc.font('Helvetica').fontSize(10);
-    doc.text('Subtotal', 360, y, { width: 100, align: 'right' });
-    doc.text(formatCOP(subtotalVal), colX.total, y, { width: colW.total, align: 'right' });
-    y += 14;
-    doc.text('IVA (19%)', 360, y, { width: 100, align: 'right' });
-    doc.text(formatCOP(ivaVal), colX.total, y, { width: colW.total, align: 'right' });
-    y += 16;
-
+    const totRow = (label, value, bold = false) => {
+      doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(bold ? 11 : 10);
+      doc.text(label, 350, y, { width: 110, align: 'right' });
+      doc.text(formatCOP(value), colX.total, y, { width: colW.total, align: 'right' });
+      y += bold ? 0 : 14;
+    };
+    totRow('Subtotal', subtotalVal);
+    if (exentoVal > 0) totRow('Base exenta', exentoVal);
+    if (iva5Val > 0) totRow('IVA (5%)', iva5Val);
+    if (iva19Val > 0 || (iva5Val === 0 && exentoVal === 0)) totRow('IVA (19%)', iva19Val);
+    y += 2;
     doc.moveTo(360, y).lineTo(562, y).strokeColor('#000000').stroke();
     y += 6;
-    doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('TOTAL PEDIDO', 360, y, { width: 100, align: 'right' });
-    doc.text(formatCOP(orderTotal), colX.total, y, { width: colW.total, align: 'right' });
+    totRow('TOTAL PEDIDO', orderTotal, true);
     y += 20;
 
     // ── Notas ───────────────────────────────────────────────

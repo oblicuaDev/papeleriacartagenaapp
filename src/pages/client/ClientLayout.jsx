@@ -1,7 +1,7 @@
 import logo from '../../logo-cartagena.jpg';
 import { useState } from 'react';
 import { NavLink, Link, Outlet, useNavigate } from 'react-router-dom';
-import { ShoppingCart, LogOut, X, Trash2, Search, ClipboardCheck, Users, BarChart3, HelpCircle } from 'lucide-react';
+import { ShoppingCart, LogOut, X, Trash2, Search, ClipboardCheck, Users, BarChart3, HelpCircle, Save } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import QuantityInput from '../../components/QuantityInput';
@@ -10,7 +10,8 @@ import CreditsFooter from '../../components/CreditsFooter';
 
 export default function ClientLayout() {
   const { currentUser, logout } = useAuth();
-  const { cart, cartTotal, cartCount, updateCartItem, removeFromCart, orders, users } = useApp();
+  const { cart, cartTotal, cartCount, updateCartItem, removeFromCart, submitOrder, orders, users } = useApp();
+  const [savingDraft, setSavingDraft] = useState(false);
 
   const isSupervisor    = currentUser?.clientRole === 'supervisor';
   const isAdminEmpresa  = currentUser?.clientRole === 'admin_empresa';
@@ -44,6 +45,19 @@ export default function ClientLayout() {
   function handleConfirm() {
     setCartOpen(false);
     navigate('/cliente/confirmar-pedido');
+  }
+
+  async function handleSaveDraft() {
+    setSavingDraft(true);
+    try {
+      await submitOrder(currentUser.id, null, '', { draft: true });
+      setCartOpen(false);
+      navigate('/cliente/pedidos');
+    } catch (err) {
+      alert(err?.message || 'No se pudo guardar el borrador');
+    } finally {
+      setSavingDraft(false);
+    }
   }
 
   return (
@@ -244,6 +258,14 @@ export default function ClientLayout() {
                     className="w-full py-3 bg-blue-700 text-white rounded-xl text-sm font-semibold hover:bg-blue-800 transition"
                   >
                     Revisar y confirmar pedido
+                  </button>
+                  <button
+                    onClick={handleSaveDraft}
+                    disabled={savingDraft}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition"
+                  >
+                    <Save className="w-4 h-4" />
+                    {savingDraft ? 'Guardando...' : 'Guardar borrador'}
                   </button>
                 </div>
               )}

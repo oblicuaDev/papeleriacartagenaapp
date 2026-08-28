@@ -7,7 +7,7 @@
 import ExcelJS from 'exceljs';
 import fs from 'fs';
 import { LOGO_PATH } from './purchaseOrderPdf.js';
-import { splitIva } from './iva.js';
+import { aggregateOrderIva, ivaRateLabel } from './iva.js';
 
 const COMPANY_NAME = 'Papelería Cartagena';
 
@@ -190,7 +190,7 @@ export async function buildOrderDetailXlsx({ order, items, plain = false }) {
   // ── Tabla de items ────────────────────────────────────────
   row += 2;
   const headerRow = row;
-  const headers = ['SKU', 'Producto', 'Cant', 'Unidad', 'P. Unit', 'Total línea'];
+  const headers = ['SKU', 'Producto', 'Cant', 'Unidad', 'IVA', 'P. Unit', 'Total línea'];
   headers.forEach((h, i) => {
     const cell = ws.getCell(headerRow, i + 1);
     cell.value = h;
@@ -203,41 +203,49 @@ export async function buildOrderDetailXlsx({ order, items, plain = false }) {
 
   let total = 0;
   for (const it of items) {
-    const subtotal = Number(it.unit_price) * Number(it.quantity);
-    total += subtotal;
+    const lineTotal = Number(it.unit_price) * Number(it.quantity);
+    total += lineTotal;
     ws.getRow(row).values = [
       it.sku,
       it.product_name,
       Number(it.quantity),
       it.unit,
+      ivaRateLabel(it.iva_rate ?? 19),
       Number(it.unit_price),
-      subtotal,
+      lineTotal,
     ];
-    ws.getCell(row, 5).numFmt = '"$"#,##0';
     ws.getCell(row, 6).numFmt = '"$"#,##0';
+    ws.getCell(row, 7).numFmt = '"$"#,##0';
     ws.getCell(row, 3).alignment = { horizontal: 'right' };
+    ws.getCell(row, 5).alignment = { horizontal: 'right' };
     row++;
   }
 
-  // ── Subtotal / IVA / Total ───────────────────────────────────
+  // ── Subtotal / IVA por tasa / Total ──────────────────────────
   const orderTotal = Number(order.total ?? total);
-  const fallbackSplit = splitIva(orderTotal);
-  const subtotalVal = order.subtotal != null ? Number(order.subtotal) : fallbackSplit.subtotal;
-  const ivaVal = order.iva != null ? Number(order.iva) : fallbackSplit.iva;
+  const agg = aggregateOrderIva(items.map(it => ({
+    lineTotal: Number(it.unit_price) * Number(it.quantity),
+    ivaRate: Number(it.iva_rate ?? 19),
+  })));
+  const subtotalVal = order.subtotal != null ? Number(order.subtotal) : agg.subtotal;
+  const iva19Val = order.iva_19 != null ? Number(order.iva_19) : agg.iva19;
+  const iva5Val = order.iva_5 != null ? Number(order.iva_5) : agg.iva5;
+  const exentoVal = order.iva_exento_base != null ? Number(order.iva_exento_base) : agg.exentoBase;
 
-  const totalsRows = [
-    ['Subtotal', subtotalVal, false],
-    ['IVA (19%)', ivaVal, false],
-    ['TOTAL PEDIDO', orderTotal, true],
-  ];
+  const totalsRows = [['Subtotal', subtotalVal, false]];
+  if (exentoVal > 0) totalsRows.push(['Base exenta', exentoVal, false]);
+  if (iva5Val > 0) totalsRows.push(['IVA (5%)', iva5Val, false]);
+  if (iva19Val > 0 || (iva5Val === 0 && exentoVal === 0)) totalsRows.push(['IVA (19%)', iva19Val, false]);
+  totalsRows.push(['TOTAL PEDIDO', orderTotal, true]);
+
   for (const [label, value, bold] of totalsRows) {
-    ws.mergeCells(`A${row}:E${row}`);
+    ws.mergeCells(`A${row}:F${row}`);
     ws.getCell(`A${row}`).value = label;
     ws.getCell(`A${row}`).font  = { bold };
     ws.getCell(`A${row}`).alignment = { horizontal: 'right' };
-    ws.getCell(`F${row}`).value = value;
-    ws.getCell(`F${row}`).font  = { bold };
-    ws.getCell(`F${row}`).numFmt = '"$"#,##0';
+    ws.getCell(`G${row}`).value = value;
+    ws.getCell(`G${row}`).font  = { bold };
+    ws.getCell(`G${row}`).numFmt = '"$"#,##0';
     row++;
   }
 
@@ -246,8 +254,9 @@ export async function buildOrderDetailXlsx({ order, items, plain = false }) {
   ws.getColumn(2).width = 40;
   ws.getColumn(3).width = 8;
   ws.getColumn(4).width = 12;
-  ws.getColumn(5).width = 14;
-  ws.getColumn(6).width = 16;
+  ws.getColumn(5).width = 9;
+  ws.getColumn(6).width = 14;
+  ws.getColumn(7).width = 16;
 
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

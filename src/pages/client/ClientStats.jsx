@@ -296,11 +296,13 @@ export default function ClientStats() {
       )}
 
       {/* KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Package}    label="Pedidos"          value={stats.totalOrders} accent="blue" />
-        <StatCard icon={Wallet}     label="Subtotal Pedidos" value={formatCOP(stats.totalSubtotal)} accent="emerald" />
-        <StatCard icon={Receipt}    label="IVA Pedidos (19%)" value={formatCOP(stats.totalIva)}     accent="amber" />
-        <StatCard icon={DollarSign} label="Total Pedidos"    value={formatCOP(stats.totalSpent)}    accent="rose" />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatCard icon={Package}    label="Pedidos"     value={stats.totalOrders} accent="blue" />
+        <StatCard icon={Wallet}     label="Subtotal"    value={formatCOP(stats.totalSubtotal)} accent="emerald" />
+        <StatCard icon={Receipt}    label="IVA 19%"     value={formatCOP(stats.totalIva19 ?? stats.totalIva)} accent="amber" />
+        <StatCard icon={Receipt}    label="IVA 5%"      value={formatCOP(stats.totalIva5 ?? 0)} accent="amber" />
+        <StatCard icon={Receipt}    label="Base exenta" value={formatCOP(stats.totalExentoBase ?? 0)} accent="blue" />
+        <StatCard icon={DollarSign} label="Total"       value={formatCOP(stats.totalSpent)} accent="rose" />
       </div>
 
       {/* Presupuesto anual — solo admin_empresa con presupuesto configurado */}

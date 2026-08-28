@@ -18,7 +18,7 @@ import { useApp } from "../../context/AppContext";
 import { useAuth } from "../../context/AuthContext";
 import QuantityInput from "../../components/QuantityInput";
 import { catalogApi } from "../../services/api";
-import { formatCOP } from "../../data/mockData";
+import { formatCOP, ivaRateLabel } from "../../data/mockData";
 import productFallback from "../../product.webp";
 
 const PAGE_SIZE = 24;
@@ -123,7 +123,9 @@ function ProductModal({
             <p className="text-2xl font-bold text-blue-700">
               {formatCOP(price)}
             </p>
-            <p className="text-xs text-gray-400">por {product.unit} · IVA incluido (19%)</p>
+            <p className="text-xs text-gray-400">
+              por {product.unit} · {Number(product.ivaRate ?? 19) === 0 ? "Exento de IVA" : `IVA incluido (${ivaRateLabel(product.ivaRate ?? 19)})`}
+            </p>
           </div>
 
           {/* Quantity + Add — solo para roles que crean pedidos */}

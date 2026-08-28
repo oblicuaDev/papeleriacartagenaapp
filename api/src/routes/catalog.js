@@ -69,7 +69,8 @@ router.get('/', async (req, res) => {
          c.name AS "categoryName",
          p.description,
          ${priceSelect} AS price,
-         p.stock, p.unit, 
+         p.iva_rate AS "ivaRate",
+         p.stock, p.unit,
          p.image_url AS "imageUrl",
          COALESCE(
            ARRAY(SELECT complementary_id FROM product_complementaries WHERE product_id = p.id),
@@ -163,6 +164,7 @@ router.get('/related', async (req, res) => {
                 p.category_id AS "categoryId",
                 c.name AS "categoryName",
                 ${priceSelect} AS price,
+                p.iva_rate AS "ivaRate",
                 p.stock, p.unit,
                 p.image_url AS "imageUrl"
          FROM products p

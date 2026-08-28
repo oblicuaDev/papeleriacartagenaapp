@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Package, Users, ShoppingCart, ClipboardList, CheckCircle, Box, CalendarDays, X, Wallet, Receipt, DollarSign } from 'lucide-react';
+import { Package, Users, ShoppingCart, ClipboardList, CheckCircle, Box, CalendarDays, X, Wallet, Receipt, DollarSign, Percent } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
@@ -187,11 +187,14 @@ export default function AdminDashboard() {
         <StatCard label="Total Pedidos"      value={filtered.length}  icon={ClipboardList} color="bg-purple-500" />
       </div>
 
-      {/* Subtotal / IVA / Total del periodo seleccionado */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard label="Subtotal Pedidos" value={formatCOP(stats?.totalSubtotal ?? 0)} icon={Wallet}     color="bg-emerald-500" />
-        <StatCard label="IVA Pedidos (19%)" value={formatCOP(stats?.totalIva ?? 0)}     icon={Receipt}    color="bg-amber-500"   />
-        <StatCard label="Total Pedidos ($)" value={formatCOP(stats?.totalRevenue ?? 0)} icon={DollarSign} color="bg-blue-600"    />
+      {/* Subtotal / IVA discriminado / Total del periodo seleccionado */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatCard label="Subtotal" value={formatCOP(stats?.totalSubtotal ?? 0)}       icon={Wallet}     color="bg-emerald-500" />
+        <StatCard label="IVA 19%"  value={formatCOP(stats?.totalIva19 ?? 0)}          icon={Percent}    color="bg-amber-500"   />
+        <StatCard label="IVA 5%"   value={formatCOP(stats?.totalIva5 ?? 0)}           icon={Percent}    color="bg-amber-400"   />
+        <StatCard label="Base exenta" value={formatCOP(stats?.totalExentoBase ?? 0)}  icon={Receipt}    color="bg-slate-400"   />
+        <StatCard label="IVA total" value={formatCOP(stats?.totalIva ?? 0)}           icon={Receipt}    color="bg-orange-500"  />
+        <StatCard label="Total"    value={formatCOP(stats?.totalRevenue ?? 0)}        icon={DollarSign} color="bg-blue-600"    />
       </div>
 
       {/* Top products + Recent orders */}

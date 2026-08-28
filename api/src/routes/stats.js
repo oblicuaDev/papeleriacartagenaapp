@@ -49,6 +49,7 @@ function buildScopeFilter(req) {
     conds.push(`uc.id = $${params.push(parseInt(qUserId))}`);
   }
 
+  conds.push(`o.status <> 'Borrador'`);
   if (status)   conds.push(`o.status = $${params.push(status)}`);
   if (dateFrom) conds.push(`o.created_at >= $${params.push(dateFrom)}`);
   if (dateTo)   conds.push(`o.created_at <= $${params.push(dateTo + ' 23:59:59')}`);
@@ -75,13 +76,14 @@ function buildScopeFilter(req) {
 router.get('/admin', requireRole('admin'), async (req, res) => {
   const { dateFrom, dateTo } = req.query;
   const rangeParams = [];
-  const rangeConds = [];
+  // Los borradores nunca cuentan en indicadores.
+  const rangeConds = [`o.status <> 'Borrador'`];
   if (dateFrom) rangeConds.push(`o.created_at >= $${rangeParams.push(dateFrom)}`);
   if (dateTo)   rangeConds.push(`o.created_at <= $${rangeParams.push(dateTo + ' 23:59:59')}`);
   // rangeWhere: para queries con FROM orders o (WHERE independiente).
   // rangeWhereAnd: para queries que ya traen su propio WHERE (ej. status NOT IN...).
-  const rangeWhere    = rangeConds.length ? 'WHERE ' + rangeConds.join(' AND ') : '';
-  const rangeWhereAnd = rangeConds.length ? 'AND ' + rangeConds.join(' AND ') : '';
+  const rangeWhere    = 'WHERE ' + rangeConds.join(' AND ');
+  const rangeWhereAnd = 'AND ' + rangeConds.join(' AND ');
 
   try {
     const [
@@ -98,6 +100,9 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
         `SELECT COUNT(*) AS total,
                 COALESCE(SUM(o.subtotal), 0) AS subtotal,
                 COALESCE(SUM(o.iva), 0) AS iva,
+                COALESCE(SUM(o.iva_19), 0) AS iva19,
+                COALESCE(SUM(o.iva_5), 0) AS iva5,
+                COALESCE(SUM(o.iva_exento_base), 0) AS exento_base,
                 COALESCE(SUM(o.total), 0) AS revenue
          FROM orders o ${rangeWhere}`,
         rangeParams
@@ -108,11 +113,12 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
                COALESCE(SUM(iva), 0) AS iva,
                COALESCE(SUM(total), 0) AS revenue
         FROM orders
-        WHERE DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())`),
+        WHERE status <> 'Borrador'
+          AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())`),
       pool.query(`
         SELECT status, COUNT(*) AS count
         FROM orders
-        WHERE status NOT IN ('Pendiente por aprobar', 'Rechazado')
+        WHERE status NOT IN ('Borrador', 'Pendiente por aprobar', 'Rechazado')
         GROUP BY status`),
       pool.query(
         `SELECT TO_CHAR(DATE_TRUNC('month', o.created_at), 'YYYY-MM') AS month,
@@ -160,6 +166,9 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
       ordersThisMonth:  parseInt(monthRows[0].total),
       totalSubtotal:    parseFloat(totalRows[0].subtotal),
       totalIva:         parseFloat(totalRows[0].iva),
+      totalIva19:       parseFloat(totalRows[0].iva19),
+      totalIva5:        parseFloat(totalRows[0].iva5),
+      totalExentoBase:  parseFloat(totalRows[0].exento_base),
       totalRevenue:     parseFloat(totalRows[0].revenue),
       subtotalThisMonth:parseFloat(monthRows[0].subtotal),
       ivaThisMonth:     parseFloat(monthRows[0].iva),
@@ -187,7 +196,7 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
   // (las de total/mes/status se dejan como estaban, sin filtro de periodo,
   // para no cambiar el significado de "mis pedidos" ya usado en otras vistas)
   const rangeParams = [advisorId];
-  const rangeConds = [`o.advisor_id = $1`];
+  const rangeConds = [`o.advisor_id = $1`, `o.status <> 'Borrador'`];
   if (companyId) rangeConds.push(`uc.company_id = $${rangeParams.push(parseInt(companyId))}`);
   if (dateFrom)  rangeConds.push(`o.created_at >= $${rangeParams.push(dateFrom)}`);
   if (dateTo)    rangeConds.push(`o.created_at <= $${rangeParams.push(dateTo + ' 23:59:59')}`);
@@ -205,6 +214,9 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
         `SELECT COUNT(*) AS total,
                 COALESCE(SUM(o.subtotal), 0) AS subtotal,
                 COALESCE(SUM(o.iva), 0) AS iva,
+                COALESCE(SUM(o.iva_19), 0) AS iva19,
+                COALESCE(SUM(o.iva_5), 0) AS iva5,
+                COALESCE(SUM(o.iva_exento_base), 0) AS exento_base,
                 COALESCE(SUM(o.total), 0) AS revenue
          FROM orders o
          JOIN users uc ON uc.id = o.client_id
@@ -217,13 +229,13 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
                 COALESCE(SUM(iva), 0) AS iva,
                 COALESCE(SUM(total), 0) AS revenue
          FROM orders
-         WHERE advisor_id = $1
+         WHERE advisor_id = $1 AND status <> 'Borrador'
            AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())`,
         [advisorId]
       ),
       pool.query(
         `SELECT status, COUNT(*) AS count FROM orders
-         WHERE advisor_id = $1 GROUP BY status`,
+         WHERE advisor_id = $1 AND status <> 'Borrador' GROUP BY status`,
         [advisorId]
       ),
       pool.query(
@@ -259,6 +271,9 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
       myOrdersThisMonth:parseInt(monthRows[0].total),
       mySubtotal:       parseFloat(totalRows[0].subtotal),
       myIva:            parseFloat(totalRows[0].iva),
+      myIva19:          parseFloat(totalRows[0].iva19),
+      myIva5:           parseFloat(totalRows[0].iva5),
+      myExentoBase:     parseFloat(totalRows[0].exento_base),
       myRevenue:        parseFloat(totalRows[0].revenue),
       subtotalThisMonth:parseFloat(monthRows[0].subtotal),
       ivaThisMonth:     parseFloat(monthRows[0].iva),
@@ -324,6 +339,9 @@ router.get('/client', requireRole('client'), async (req, res) => {
     where += ` AND uc.id = $${params.push(parseInt(qUserId))}`;
   }
 
+  // Los borradores no cuentan en estadisticas.
+  where += ` AND o.status <> 'Borrador'`;
+
   // Rango de fechas (aplica a totalRows/statusRows/monthlyRows/topProdRows/topUserRows,
   // que comparten `where`; monthRows agrega ademas su propio filtro de mes calendario).
   where += ` AND o.created_at >= $${params.push(dateFrom)}`;
@@ -358,6 +376,9 @@ router.get('/client', requireRole('client'), async (req, res) => {
         `SELECT COUNT(*) AS total,
                 COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS subtotal,
                 COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS iva,
+                COALESCE(SUM(o.iva_19) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS iva19,
+                COALESCE(SUM(o.iva_5) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS iva5,
+                COALESCE(SUM(o.iva_exento_base) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS exento_base,
                 COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS revenue
          ${fromJoin} WHERE ${where}`,
         params
@@ -453,6 +474,9 @@ router.get('/client', requireRole('client'), async (req, res) => {
       ordersThisMonth:  parseInt(monthRows[0].total),
       totalSubtotal:    parseFloat(totalRows[0].subtotal),
       totalIva:         parseFloat(totalRows[0].iva),
+      totalIva19:       parseFloat(totalRows[0].iva19),
+      totalIva5:        parseFloat(totalRows[0].iva5),
+      totalExentoBase:  parseFloat(totalRows[0].exento_base),
       totalSpent:       parseFloat(totalRows[0].revenue),
       subtotalThisMonth:parseFloat(monthRows[0].subtotal),
       ivaThisMonth:     parseFloat(monthRows[0].iva),

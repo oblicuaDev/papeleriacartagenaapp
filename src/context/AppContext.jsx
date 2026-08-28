@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { useAuth } from "./AuthContext";
-import { splitIva } from "../data/mockData";
+import { aggregateOrderIva } from "../data/mockData";
 import {
   productsApi,
   categoriesApi,
@@ -202,6 +202,7 @@ export function AppProvider({ children }) {
           quantity,
           unitPrice,
           unit: product.unit,
+          ivaRate: product.ivaRate ?? 19,
         },
       ];
     });
@@ -235,16 +236,32 @@ export function AppProvider({ children }) {
   // mismatches con 409. Mandamos unitPrice solo como verificacion: si el
   // backend ve algo distinto, lanza error y mostramos al usuario que el
   // precio cambio.
-  async function submitOrder(_clientId, _advisorId, notes) {
+  async function submitOrder(_clientId, _advisorId, notes, { draft = false } = {}) {
     const items = cart.map((i) => ({
       productId: i.productId,
       quantity: i.quantity,
       unitPrice: i.unitPrice, // verificacion contra precio backend
     }));
-    const created = await ordersApi.create({ notes, items });
-    setOrders((prev) => [created, ...prev]);
+    const created = await ordersApi.create({ notes, items, draft });
+    // Un borrador reemplaza al anterior (mismo comportamiento en backend).
+    setOrders((prev) => [created, ...prev.filter((o) => !(draft && o.status === "Borrador"))]);
     clearCart();
     return created.id;
+  }
+
+  // ── Retomar un borrador → carrito ──────────────────────────
+  async function resumeDraft(orderId) {
+    const full = await ordersApi.get(orderId);
+    const items = full.items || [];
+    clearCart();
+    for (const it of items) {
+      addToCart(
+        { id: it.productId, name: it.productName, unit: it.unit || "", ivaRate: it.ivaRate ?? 19 },
+        Math.trunc(Number(it.quantity)) || 1,
+        Math.round(Number(it.unitPrice) * 100) / 100,
+      );
+    }
+    return items.length;
   }
 
   // ── Actualizar pedido → API ─────────────────────────────────
@@ -299,9 +316,17 @@ export function AppProvider({ children }) {
     setUsers(res);
   }
 
-  const cartTotal = cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
   const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
-  const { subtotal: cartSubtotal, iva: cartIva } = splitIva(cartTotal);
+  const {
+    total: cartTotal,
+    subtotal: cartSubtotal,
+    iva: cartIva,
+    iva5: cartIva5,
+    iva19: cartIva19,
+    exentoBase: cartExentoBase,
+  } = aggregateOrderIva(
+    cart.map((i) => ({ lineTotal: i.unitPrice * i.quantity, ivaRate: i.ivaRate ?? 19 })),
+  );
 
   return (
     <AppContext.Provider
@@ -326,6 +351,9 @@ export function AppProvider({ children }) {
         cartTotal,
         cartSubtotal,
         cartIva,
+        cartIva5,
+        cartIva19,
+        cartExentoBase,
         cartCount,
         loadingApp,
         addToCart,
@@ -333,6 +361,7 @@ export function AppProvider({ children }) {
         removeFromCart,
         clearCart,
         submitOrder,
+        resumeDraft,
         updateOrder,
         refreshOrders,
         refreshProducts,

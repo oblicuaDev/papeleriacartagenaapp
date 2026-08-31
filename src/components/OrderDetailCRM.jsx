@@ -125,7 +125,9 @@ function handleDownloadAttachment(att) {
 function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
   const isAdvisor = currentUser?.role === "advisor";
   const isAdmin = currentUser?.role === "admin";
-  const canEdit = (isAdvisor || isAdmin) && order.status === "Validar disponibilidad";
+  // Un pedido aprobado queda cerrado: solo se editan sus items mientras está
+  // "Pendiente por aprobar", y solo el admin (apoyando al cliente).
+  const canEdit = isAdmin && order.status === "Pendiente por aprobar";
 
   const [editing, setEditing] = useState(false);
   const [localItems, setLocalItems] = useState(order.items || []);
@@ -271,7 +273,7 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
             onClick={startEdit}
             className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition"
           >
-            Validar disponibilidad
+            Modificar pedido
           </button>
         )}
       </div>

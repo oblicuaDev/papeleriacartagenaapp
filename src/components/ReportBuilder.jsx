@@ -25,6 +25,13 @@ const DATASET_META = {
   users: { label: "Usuarios", hint: "Clientes, asesores, repartidores", icon: Users },
 };
 const DATASET_ORDER = ["orders", "order_items", "products", "users"];
+// Orden preferido; los datasets realmente disponibles vienen del backend (meta).
+function orderedDatasets(meta) {
+  const keys = Object.keys(meta || {});
+  return DATASET_ORDER.filter((k) => keys.includes(k)).concat(
+    keys.filter((k) => !DATASET_ORDER.includes(k)),
+  );
+}
 
 const ORDER_STATUSES = [
   "Pendiente por aprobar",
@@ -85,9 +92,18 @@ export default function ReportBuilder() {
       .catch(() => setMetaError("No se pudo cargar la configuración de reportes."));
   }, []);
 
+  const datasetKeys = useMemo(() => orderedDatasets(meta), [meta]);
   const dsMeta = meta?.[dataset];
   const availableColumns = dsMeta?.columns || [];
   const availableFilters = dsMeta?.filters || [];
+
+  // Si el dataset seleccionado no está disponible (p. ej. cliente que solo ve
+  // Pedidos/Ítems), saltar al primero disponible.
+  useEffect(() => {
+    if (datasetKeys.length && !datasetKeys.includes(dataset)) {
+      setDataset(datasetKeys[0]);
+    }
+  }, [datasetKeys, dataset]);
 
   useEffect(() => {
     if (!dsMeta) return;
@@ -287,8 +303,8 @@ export default function ReportBuilder() {
           ¿Qué quieres exportar?
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {DATASET_ORDER.map((key) => {
-            const m = DATASET_META[key];
+          {datasetKeys.map((key) => {
+            const m = DATASET_META[key] || { label: key, hint: "", icon: FileSpreadsheet };
             const Icon = m.icon;
             const activeDs = dataset === key;
             return (

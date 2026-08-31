@@ -3,16 +3,17 @@ import { useEffect, useState } from 'react';
 import {
   ArrowLeft, Package, FileText, Paperclip, MessageSquare,
   File, FileText as FilePdf, ImageIcon, Download, User, Calendar, Truck,
-  FileDown, Sheet,
+  FileDown, Sheet, XCircle, CheckCircle2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import QuantityInput from '../../components/QuantityInput';
+import { RejectModal, ConfirmApproveModal } from '../../components/OrderApprovalModals';
 import { ordersApi } from '../../services/api';
 import { STATUS_STYLES, formatCOP, aggregateOrderIva, ivaRateLabel } from '../../data/mockData';
 
-// Estados en los que el pedido todavia se puede editar (antes de Alistamiento).
-const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente', 'Validar disponibilidad'];
+// Un pedido solo se edita ANTES de su aprobación formal. Aprobado = cerrado.
+const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente'];
 
 function fileIcon(type = '') {
   if (type.startsWith('image/')) return <ImageIcon className="w-4 h-4 text-blue-500" />;
@@ -46,7 +47,7 @@ function roleBadge(role) {
 export default function ClientOrderDetail() {
   const { orderId } = useParams();
   const navigate    = useNavigate();
-  const { users } = useApp();
+  const { users, updateOrder } = useApp();
   const { currentUser } = useAuth();
 
   // El listado /orders no trae items/comments/attachments. Hacemos fetch del
@@ -71,6 +72,62 @@ export default function ClientOrderDetail() {
   const advisor  = order ? users.find(u => u.id === order.advisorId) : null;
   const comments    = order?.comments    || [];
   const attachments = order?.attachments || [];
+
+  // ── Aprobación ──────────────────────────────────────────────
+  const clientRole = currentUser?.clientRole;
+  const orderClient = order ? users.find(u => u.id === order.clientId) : null;
+  const canApprove = order && order.status === 'Pendiente por aprobar' && (
+    clientRole === 'administrador_contrato' ||
+    (clientRole === 'supervisor' && orderClient?.sucursalId === currentUser?.sucursalId)
+  );
+  const [confirmApprove, setConfirmApprove] = useState(false);
+  const [showReject, setShowReject] = useState(false);
+  const [approveError, setApproveError] = useState(null);
+
+  async function doApprove() {
+    setApproveError(null);
+    try {
+      await updateOrder(order.id, { status: 'Validar disponibilidad' });
+      const full = await ordersApi.get(order.id);
+      setOrder(full);
+      setConfirmApprove(false);
+    } catch (err) {
+      setApproveError(err?.message || 'No se pudo aprobar');
+      setConfirmApprove(false);
+    }
+  }
+
+  async function doReject(reason) {
+    setApproveError(null);
+    try {
+      await updateOrder(order.id, { status: 'Rechazado', reason });
+      const full = await ordersApi.get(order.id);
+      setOrder(full);
+      setShowReject(false);
+    } catch (err) {
+      setApproveError(err?.message || 'No se pudo rechazar');
+      setShowReject(false);
+    }
+  }
+
+  // Quién aprobó/rechazó (del timeline) — para pedidos que ya salieron de "Pendiente por aprobar".
+  const [decision, setDecision] = useState(null); // { toStatus, actorName, at }
+  useEffect(() => {
+    if (!order || order.status === 'Pendiente por aprobar') { setDecision(null); return; }
+    let cancelled = false;
+    ordersApi.timeline(order.id)
+      .then((res) => {
+        if (cancelled) return;
+        const ev = (res.events || []).find(
+          e => e.eventType === 'status' &&
+            e.payload?.fromStatus === 'Pendiente por aprobar' &&
+            ['Validar disponibilidad', 'Rechazado', 'Pendiente'].includes(e.payload?.toStatus)
+        );
+        setDecision(ev ? { toStatus: ev.payload.toStatus, actorName: ev.actorName, at: ev.occurredAt } : null);
+      })
+      .catch(() => setDecision(null));
+    return () => { cancelled = true; };
+  }, [order?.id, order?.status]);
 
   // admin_empresa es de solo lectura; el resto de roles cliente pueden
   // editar mientras el pedido no haya entrado a Alistamiento.
@@ -224,25 +281,53 @@ export default function ClientOrderDetail() {
           Volver a mis pedidos
         </button>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handleDownload('pdf')}
-            disabled={downloading !== null}
-            className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 hover:border-red-300 disabled:opacity-50 disabled:cursor-wait transition"
-          >
-            <FileDown className="w-4 h-4" />
-            {downloading === 'pdf' ? 'Generando…' : 'Descargar pedido en PDF'}
-          </button>
-          <button
-            onClick={() => handleDownload('xlsx')}
-            disabled={downloading !== null}
-            className="flex items-center gap-2 px-4 py-2 border border-emerald-200 text-emerald-700 bg-emerald-50 rounded-lg text-sm font-medium hover:bg-emerald-100 hover:border-emerald-300 disabled:opacity-50 disabled:cursor-wait transition"
-          >
-            <Sheet className="w-4 h-4" />
-            {downloading === 'xlsx' ? 'Generando…' : 'Descargar pedido en EXCEL'}
-          </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {canApprove && (
+            <>
+              <button
+                onClick={() => setShowReject(true)}
+                className="flex items-center gap-2 px-4 py-2 border-2 border-red-200 text-red-600 rounded-lg text-sm font-semibold hover:bg-red-50 transition"
+              >
+                <XCircle className="w-4 h-4" />
+                Rechazar
+              </button>
+              <button
+                onClick={() => setConfirmApprove(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-semibold transition"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Aprobar pedido
+              </button>
+            </>
+          )}
+          {order.status !== 'Pendiente por aprobar' && (
+            <>
+              <button
+                onClick={() => handleDownload('pdf')}
+                disabled={downloading !== null}
+                className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 hover:border-red-300 disabled:opacity-50 disabled:cursor-wait transition"
+              >
+                <FileDown className="w-4 h-4" />
+                {downloading === 'pdf' ? 'Generando…' : 'Descargar pedido en PDF'}
+              </button>
+              <button
+                onClick={() => handleDownload('xlsx')}
+                disabled={downloading !== null}
+                className="flex items-center gap-2 px-4 py-2 border border-emerald-200 text-emerald-700 bg-emerald-50 rounded-lg text-sm font-medium hover:bg-emerald-100 hover:border-emerald-300 disabled:opacity-50 disabled:cursor-wait transition"
+              >
+                <Sheet className="w-4 h-4" />
+                {downloading === 'xlsx' ? 'Generando…' : 'Descargar pedido en EXCEL'}
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {approveError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm">
+          {approveError}
+        </div>
+      )}
 
       <div className="flex gap-5 items-start">
 
@@ -264,6 +349,16 @@ export default function ClientOrderDetail() {
                     <Calendar className="w-3.5 h-3.5" />
                     Creado: <span className="font-medium text-gray-700">{order.createdAt}</span>
                   </p>
+                  {decision && (
+                    <p className="flex items-center gap-1.5">
+                      {decision.toStatus === 'Rechazado'
+                        ? <XCircle className="w-3.5 h-3.5 text-red-500" />
+                        : <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />}
+                      {decision.toStatus === 'Rechazado' ? 'Rechazado por' : 'Aprobado por'}:{' '}
+                      <span className="font-medium text-gray-700">{decision.actorName || '—'}</span>
+                      {decision.at && <span className="text-gray-400"> · {formatDateTime(decision.at)}</span>}
+                    </p>
+                  )}
                   {advisor && (
                     <p className="flex items-center gap-1.5">
                       <User className="w-3.5 h-3.5" />
@@ -545,6 +640,21 @@ export default function ClientOrderDetail() {
         </div>
 
       </div>
+
+      {confirmApprove && (
+        <ConfirmApproveModal
+          order={order}
+          onConfirm={doApprove}
+          onCancel={() => setConfirmApprove(false)}
+        />
+      )}
+      {showReject && (
+        <RejectModal
+          order={order}
+          onConfirm={doReject}
+          onCancel={() => setShowReject(false)}
+        />
+      )}
     </div>
   );
 }

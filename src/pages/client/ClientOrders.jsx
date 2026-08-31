@@ -11,16 +11,20 @@ const IN_DELIVERY_STATUSES = ['Alistamiento', 'En Ruta'];
 
 // Tabs visibles para creador_pedidos / supervisor / admin_empresa.
 // 'Aprobados' incluye 'Validar disponibilidad' (flujo nuevo) y 'Pendiente' (legacy).
+// El listado general solo muestra pedidos ya aprobados formalmente. Los que
+// están "Pendiente por aprobar" se ven únicamente en "Aprobar pedidos".
 const ORDER_TABS = [
   { value: 'all',         label: 'Todos' },
-  { value: 'pending',     label: 'Pendientes', statuses: ['Pendiente por aprobar'] },
   { value: 'approved',    label: 'Aprobados',  statuses: ['Validar disponibilidad', 'Pendiente'] },
   { value: 'in_delivery', label: 'En entrega', statuses: IN_DELIVERY_STATUSES },
   { value: 'delivered',   label: 'Entregados', statuses: ['Entregado'] },
+  { value: 'rejected',    label: 'Rechazados', statuses: ['Rechazado'] },
 ];
 
+// Estados excluidos del listado general (solo visibles en "Aprobar pedidos").
+const HIDDEN_STATUSES = ['Pendiente por aprobar'];
+
 const ALL_STATUSES = [
-  'Pendiente por aprobar',
   'Rechazado',
   'Pendiente',
   'Validar disponibilidad',
@@ -101,6 +105,7 @@ export default function ClientOrders() {
   const myOrders = useMemo(() => {
     return [...orders]
       .filter(o => visibleClientIds.includes(o.clientId))
+      .filter(o => !HIDDEN_STATUSES.includes(o.status))
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   }, [orders, visibleClientIds]);
 

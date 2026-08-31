@@ -30,6 +30,11 @@ function scopeCompanyId(req) {
   return req.user.role === 'admin' ? null : req.user.companyId;
 }
 
+// Con scope de empresa el cliente solo puede exportar informes operativos de
+// su contrato: nada de catalogo completo ni de otros clientes/personal interno.
+// (cada DATASETS.<x>.scopedHiddenCols lista las columnas de personal interno)
+const SCOPED_DATASETS = ['orders', 'order_items'];
+
 const MONEY = '"$"#,##0';
 
 // Helpers de filtro: reciben (valor, paramsArray) y devuelven el fragmento SQL.
@@ -56,6 +61,7 @@ const DATASETS = {
       LEFT JOIN users ud     ON ud.id = o.delivery_id`,
     dateColumn: 'o.created_at',
     scopeCol: 'uc.company_id',
+    scopedHiddenCols: ['advisor', 'delivery', 'carrier'],
     columns: {
       id:           { header: 'ID',          sql: 'o.id' },
       status:       { header: 'Estado',      sql: 'o.status' },
@@ -212,7 +218,8 @@ function buildQuery(ds, query, forceCompanyId) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  const allKeys = Object.keys(ds.columns);
+  const hidden = scoped ? new Set(ds.scopedHiddenCols || []) : new Set();
+  const allKeys = Object.keys(ds.columns).filter((k) => !hidden.has(k));
   const keys = requested.length
     ? allKeys.filter((k) => requested.includes(k))
     : allKeys;
@@ -227,7 +234,12 @@ router.get('/:dataset', async (req, res) => {
   const ds = DATASETS[req.params.dataset];
   if (!ds) return res.status(422).json({ error: 'dataset desconocido' });
 
-  const { where, params, keys } = buildQuery(ds, req.query, scopeCompanyId(req));
+  const scopeId = scopeCompanyId(req);
+  if (scopeId != null && !SCOPED_DATASETS.includes(req.params.dataset)) {
+    return res.status(403).json({ error: 'No autorizado para este informe' });
+  }
+
+  const { where, params, keys } = buildQuery(ds, req.query, scopeId);
 
   try {
     if (req.query.count === '1' || req.query.count === 'true') {
@@ -285,20 +297,25 @@ router.get('/:dataset', async (req, res) => {
 // GET /reports  -> metadata para que el frontend arme el formulario
 router.get('/', (req, res) => {
   const scoped = scopeCompanyId(req) != null;
-  const meta = Object.fromEntries(
-    Object.entries(DATASETS).map(([key, ds]) => [
-      key,
-      {
-        label: ds.sheet,
-        columns: Object.entries(ds.columns).map(([k, c]) => ({ key: k, header: c.header })),
-        // Los administradores de empresa no eligen empresa/asesor: se fuerza su empresa.
-        filters: Object.keys(ds.filters).filter(
-          (f) => !(scoped && (f === 'companyId' || f === 'advisorId')),
-        ),
-      },
-    ])
-  );
-  res.json(meta);
+  const entries = Object.entries(DATASETS)
+    .filter(([key]) => !scoped || SCOPED_DATASETS.includes(key))
+    .map(([key, ds]) => {
+      const hidden = scoped ? new Set(ds.scopedHiddenCols || []) : new Set();
+      return [
+        key,
+        {
+          label: ds.sheet,
+          columns: Object.entries(ds.columns)
+            .filter(([k]) => !hidden.has(k))
+            .map(([k, c]) => ({ key: k, header: c.header })),
+          // Los administradores de empresa no eligen empresa/asesor: se fuerza su empresa.
+          filters: Object.keys(ds.filters).filter(
+            (f) => !(scoped && (f === 'companyId' || f === 'advisorId')),
+          ),
+        },
+      ];
+    });
+  res.json(Object.fromEntries(entries));
 });
 
 export default router;

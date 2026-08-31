@@ -503,14 +503,11 @@ router.post('/', requireRole('client'), async (req, res) => {
     seen.add(it.productId);
   }
 
-  // Status inicial segun clientRole. El supervisor se autoaprueba al crear
-  // (no necesita esperar a otro supervisor), pero igual entra al flujo de
-  // "Validar disponibilidad" del asesor -- igual que cualquier otro pedido
-  // aprobado. 'Pendiente' quedo reservado como estado legacy (ver
-  // VALID_TRANSITIONS): usarlo aqui dejaba el pedido fuera del alcance del
-  // asesor, que solo puede validar disponibilidad de pedidos en ese estado.
-  const initialStatus = (clientRole === 'supervisor' || clientRole === 'administrador_contrato')
-    ? 'Validar disponibilidad' : 'Pendiente por aprobar';
+  // TODO el pedido de cliente nace "Pendiente por aprobar" y requiere una
+  // aprobacion formal (incluidos los del supervisor y el administrador de
+  // contrato, que se auto-aprueban con un clic). Antes de aprobarse no llega
+  // al asesor ni cuenta para el presupuesto del contrato.
+  const initialStatus = 'Pendiente por aprobar';
 
   const client = await pool.connect();
   try {
@@ -633,15 +630,8 @@ router.post('/', requireRole('client'), async (req, res) => {
 
     await client.query('COMMIT');
 
-    // PHASE 7: si el pedido nace ya aprobado (supervisor se autoaprueba),
-    // generar la orden de compra igual que en la aprobacion via PUT /:id.
-    if (initialStatus === 'Validar disponibilidad') {
-      try {
-        await ensurePurchaseOrderPdf(newId, clientId);
-      } catch (pdfErr) {
-        console.error(`[orders] No se pudo generar PDF de ${newId}:`, pdfErr);
-      }
-    }
+    // La orden de compra se genera al aprobarse el pedido (PUT /:id), no al crearlo:
+    // ahora todos nacen "Pendiente por aprobar".
 
     return res.status(201).json({
       id:          newId,
@@ -897,17 +887,18 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// Estados en los que un pedido todavia se puede editar (antes de Alistamiento).
-const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente', 'Validar disponibilidad'];
+// Un pedido solo se puede modificar ANTES de su aprobacion formal. Una vez
+// aprobado (Validar disponibilidad en adelante) queda cerrado: nadie edita
+// items, tampoco el asesor, para que el despacho coincida con lo aprobado.
+const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente'];
 
 // PUT /orders/:id/items
-// Modificacion de items mientras el pedido no ha entrado a Alistamiento.
+// Modificacion de items solo mientras el pedido esta "Pendiente por aprobar".
 // Permite cambiar cantidades o eliminar items (no agregar productos nuevos).
-// Autorizado para: admin/asesor (sin restriccion de scope, ademas del check
-// de asesor asignado mas abajo), el gestor del pedido (solo el suyo),
-// supervisor (su sucursal) y administrador_contrato (toda su empresa).
+// Autorizado para: admin, el gestor del pedido (solo el suyo), supervisor
+// (su sucursal) y administrador_contrato (toda su empresa).
 // Cada modificacion exige un comentario y queda en order_item_changes +
-// order_comments. Recalcula total/IVA y regenera el PDF de orden de compra.
+// order_comments. Recalcula total/IVA.
 router.put('/:id/items', async (req, res) => {
   const { role, id: myId, clientRole, companyId, sucursalId } = req.user;
   const allOrders = role === 'advisor' && req.user.allOrdersAccess;
@@ -1100,13 +1091,16 @@ router.put('/:id/items', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // Regenerar PO PDF (fuera de la transaccion para no bloquear)
+    // Regenerar PO PDF solo si el pedido ya tiene una (pedidos "Pendiente por
+    // aprobar" todavia no generan orden de compra).
     let warnings;
-    try {
-      await ensurePurchaseOrderPdf(orderId, myId, pool, { regenerate: true });
-    } catch (pdfErr) {
-      console.error(`[orders] No se pudo regenerar PDF tras edicion de items en ${orderId}:`, pdfErr);
-      warnings = ['No se pudo regenerar la orden de compra'];
+    if (order.status !== 'Pendiente por aprobar') {
+      try {
+        await ensurePurchaseOrderPdf(orderId, myId, pool, { regenerate: true });
+      } catch (pdfErr) {
+        console.error(`[orders] No se pudo regenerar PDF tras edicion de items en ${orderId}:`, pdfErr);
+        warnings = ['No se pudo regenerar la orden de compra'];
+      }
     }
 
     // Estado final de items para que el frontend refresque tras la edicion.

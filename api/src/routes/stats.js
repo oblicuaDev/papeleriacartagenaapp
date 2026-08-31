@@ -445,8 +445,10 @@ router.get('/client', requireRole('client'), async (req, res) => {
     const ordersByStatus = {};
     for (const row of statusRows) ordersByStatus[row.status] = parseInt(row.count);
 
-    // Presupuesto anual: solo aplica al scope de empresa (admin_empresa).
-    // Gasto real = SUM(total) de pedidos ENTREGADOS de la empresa en el anio actual.
+    // Presupuesto anual: solo aplica al scope de empresa (admin_empresa/contrato).
+    // Gasto acumulado = SUM(total) de pedidos APROBADOS de la empresa en el anio
+    // actual (Validar disponibilidad en adelante). Los "Pendiente por aprobar",
+    // "Rechazado" y "Borrador" nunca cuentan hasta recibir aprobacion formal.
     let annualBudget = null;
     let budgetSpent = 0;
     if (isCompanyWide) {
@@ -457,8 +459,8 @@ router.get('/client', requireRole('client'), async (req, res) => {
            FROM orders o
            JOIN users uc ON uc.id = o.client_id
            WHERE uc.company_id = $1
-             AND o.status = 'Entregado'
-             AND DATE_PART('year', o.delivered_at) = DATE_PART('year', NOW())`,
+             AND o.status NOT IN ('Pendiente por aprobar', 'Rechazado', 'Borrador')
+             AND DATE_PART('year', o.created_at) = DATE_PART('year', NOW())`,
           [companyId]
         ),
       ]);

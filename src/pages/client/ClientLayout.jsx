@@ -1,7 +1,7 @@
 import logo from '../../logo-cartagena.jpg';
 import { useState } from 'react';
 import { NavLink, Link, Outlet, useNavigate } from 'react-router-dom';
-import { ShoppingCart, LogOut, X, Trash2, Search, ClipboardCheck, Users, BarChart3, HelpCircle, Save } from 'lucide-react';
+import { ShoppingCart, LogOut, X, Trash2, Search, ClipboardCheck, Users, BarChart3, HelpCircle, Save, FileSpreadsheet } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import QuantityInput from '../../components/QuantityInput';
@@ -10,8 +10,7 @@ import CreditsFooter from '../../components/CreditsFooter';
 
 export default function ClientLayout() {
   const { currentUser, logout } = useAuth();
-  const { cart, cartTotal, cartCount, updateCartItem, removeFromCart, submitOrder, orders, users } = useApp();
-  const [savingDraft, setSavingDraft] = useState(false);
+  const { cart, cartTotal, cartCount, updateCartItem, removeFromCart, orders, users } = useApp();
 
   const isSupervisor    = currentUser?.clientRole === 'supervisor';
   const isAdminEmpresa  = currentUser?.clientRole === 'admin_empresa';
@@ -47,17 +46,10 @@ export default function ClientLayout() {
     navigate('/cliente/confirmar-pedido');
   }
 
-  async function handleSaveDraft() {
-    setSavingDraft(true);
-    try {
-      await submitOrder(currentUser.id, null, '', { draft: true });
-      setCartOpen(false);
-      navigate('/cliente/pedidos');
-    } catch (err) {
-      alert(err?.message || 'No se pudo guardar el borrador');
-    } finally {
-      setSavingDraft(false);
-    }
+  function handleSaveDraft() {
+    // El carrito se conserva solo; solo cerramos el panel y volvemos al catálogo.
+    setCartOpen(false);
+    navigate('/cliente');
   }
 
   return (
@@ -117,6 +109,17 @@ export default function ClientLayout() {
               <BarChart3 className="w-4 h-4" />
               Estadísticas
             </NavLink>
+            {(isAdminEmpresa || isAdminContrato) && (
+              <NavLink
+                to="/cliente/reportes"
+                className={({ isActive }) =>
+                  `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${isActive ? 'bg-white bg-opacity-20 text-white' : 'text-blue-200 hover:text-white hover:bg-white hover:bg-opacity-10'}`
+                }
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                Reportes
+              </NavLink>
+            )}
             {canApprove && (
               <NavLink
                 to="/cliente/aprobar-pedidos"
@@ -261,11 +264,10 @@ export default function ClientLayout() {
                   </button>
                   <button
                     onClick={handleSaveDraft}
-                    disabled={savingDraft}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 disabled:opacity-50 transition"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 transition"
                   >
                     <Save className="w-4 h-4" />
-                    {savingDraft ? 'Guardando...' : 'Guardar borrador'}
+                    Guardar borrador
                   </button>
                 </div>
               )}

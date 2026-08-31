@@ -236,32 +236,16 @@ export function AppProvider({ children }) {
   // mismatches con 409. Mandamos unitPrice solo como verificacion: si el
   // backend ve algo distinto, lanza error y mostramos al usuario que el
   // precio cambio.
-  async function submitOrder(_clientId, _advisorId, notes, { draft = false } = {}) {
+  async function submitOrder(_clientId, _advisorId, notes) {
     const items = cart.map((i) => ({
       productId: i.productId,
       quantity: i.quantity,
       unitPrice: i.unitPrice, // verificacion contra precio backend
     }));
-    const created = await ordersApi.create({ notes, items, draft });
-    // Un borrador reemplaza al anterior (mismo comportamiento en backend).
-    setOrders((prev) => [created, ...prev.filter((o) => !(draft && o.status === "Borrador"))]);
+    const created = await ordersApi.create({ notes, items });
+    setOrders((prev) => [created, ...prev]);
     clearCart();
     return created.id;
-  }
-
-  // ── Retomar un borrador → carrito ──────────────────────────
-  async function resumeDraft(orderId) {
-    const full = await ordersApi.get(orderId);
-    const items = full.items || [];
-    clearCart();
-    for (const it of items) {
-      addToCart(
-        { id: it.productId, name: it.productName, unit: it.unit || "", ivaRate: it.ivaRate ?? 19 },
-        Math.trunc(Number(it.quantity)) || 1,
-        Math.round(Number(it.unitPrice) * 100) / 100,
-      );
-    }
-    return items.length;
   }
 
   // ── Actualizar pedido → API ─────────────────────────────────
@@ -361,7 +345,6 @@ export function AppProvider({ children }) {
         removeFromCart,
         clearCart,
         submitOrder,
-        resumeDraft,
         updateOrder,
         refreshOrders,
         refreshProducts,

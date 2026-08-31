@@ -25,6 +25,7 @@ import ClientApproveOrders from './pages/client/ClientApproveOrders';
 import ClientOrderDetail from './pages/client/ClientOrderDetail';
 import ClientManage from './pages/client/ClientManage';
 import ClientStats from './pages/client/ClientStats';
+import ClientReports from './pages/client/ClientReports';
 import AdvisorLayout from './pages/advisor/AdvisorLayout';
 import AdvisorOrders from './pages/advisor/AdvisorOrders';
 import AdvisorOrderDetail from './pages/advisor/AdvisorOrderDetail';
@@ -75,6 +76,7 @@ export default function App() {
             <Route path="aprobar-pedidos" element={<ClientApproveOrders />} />
             <Route path="pedidos/:orderId" element={<ClientOrderDetail />} />
             <Route path="estadisticas" element={<ClientStats />} />
+            <Route path="reportes" element={<ClientReports />} />
             <Route path="administrar" element={<ClientManage />} />
           </Route>
           <Route

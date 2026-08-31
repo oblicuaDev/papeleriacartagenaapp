@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   BarChart3, TrendingUp, Package, Users, Calendar, AlertCircle, Download,
-  Filter, Wallet, Receipt, DollarSign, CalendarDays, X, UserCircle,
+  Filter, Wallet, Receipt, DollarSign, CalendarDays, X, UserCircle, FileSpreadsheet,
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -283,15 +284,26 @@ export default function ClientStats() {
             </div>
           )}
 
-          <button
-            onClick={handleExportExcel}
-            disabled={exporting}
-            className="flex items-center gap-1.5 px-4 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-sm text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition font-medium ml-auto"
-            title="Exportar a Excel"
-          >
-            <Download className="w-4 h-4" />
-            {exporting ? 'Generando...' : 'Exportar Excel'}
-          </button>
+          {isCompanyWideView ? (
+            <Link
+              to="/cliente/reportes"
+              className="flex items-center gap-1.5 px-4 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-sm text-emerald-700 hover:bg-emerald-100 transition font-medium ml-auto"
+              title="Generar reportes de tu empresa"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Generar reporte
+            </Link>
+          ) : (
+            <button
+              onClick={handleExportExcel}
+              disabled={exporting}
+              className="flex items-center gap-1.5 px-4 py-2 border border-emerald-300 bg-emerald-50 rounded-lg text-sm text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition font-medium ml-auto"
+              title="Exportar a Excel"
+            >
+              <Download className="w-4 h-4" />
+              {exporting ? 'Generando...' : 'Exportar Excel'}
+            </button>
+          )}
         </div>
       )}
 

@@ -15,7 +15,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useApp } from "../context/AppContext";
 import QuantityInput from "./QuantityInput";
-import { ordersApi, productsApi } from "../services/api";
+import { ordersApi } from "../services/api";
 import {
   ArrowLeft,
   Truck,
@@ -40,8 +40,6 @@ import {
   FileBadge,
 } from "lucide-react";
 import { STATUS_STYLES, ORDER_STATUSES, formatCOP, statusLabel, aggregateOrderIva, ivaRateLabel } from "../data/mockData";
-
-const ITEM_EDITABLE_STATUSES = ["Borrador", "Pendiente por aprobar", "Pendiente", "Validar disponibilidad"];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -127,7 +125,7 @@ function handleDownloadAttachment(att) {
 function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
   const isAdvisor = currentUser?.role === "advisor";
   const isAdmin = currentUser?.role === "admin";
-  const canEdit = (isAdvisor || isAdmin) && ITEM_EDITABLE_STATUSES.includes(order.status);
+  const canEdit = (isAdvisor || isAdmin) && order.status === "Validar disponibilidad";
 
   const [editing, setEditing] = useState(false);
   const [localItems, setLocalItems] = useState(order.items || []);
@@ -155,45 +153,17 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
     quantity: Number(it.quantity),
     ivaRate: Number(it.ivaRate ?? 19),
     removed: false,
-    added: false,
   });
   const [draft, setDraft] = useState(() => (order.items || []).map(mapItem));
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [errMsg, setErrMsg] = useState(null);
-  const [prodQuery, setProdQuery] = useState("");
-  const [prodResults, setProdResults] = useState([]);
 
   function startEdit() {
     setDraft((localItems || []).map(mapItem));
     setReason("");
-    setProdQuery("");
-    setProdResults([]);
     setErrMsg(null);
     setEditing(true);
-  }
-
-  useEffect(() => {
-    if (!editing || !prodQuery.trim()) { setProdResults([]); return; }
-    const t = setTimeout(() => {
-      productsApi.list({ search: prodQuery.trim(), limit: 15, active: true })
-        .then((r) => setProdResults(r?.data ?? []))
-        .catch(() => setProdResults([]));
-    }, 300);
-    return () => clearTimeout(t);
-  }, [prodQuery, editing]);
-
-  function addDraftProduct(p) {
-    setDraft((prev) => {
-      if (prev.some((it) => it.productId === p.id && !it.removed)) return prev;
-      return [...prev, {
-        productId: p.id, productName: p.name, sku: p.sku, unit: p.unit,
-        unitPrice: Number(p.price) || 0, quantity: 1,
-        ivaRate: Number(p.ivaRate ?? p.iva_rate ?? 19), removed: false, added: true,
-      }];
-    });
-    setProdQuery("");
-    setProdResults([]);
   }
 
   function cancelEdit() {
@@ -210,16 +180,15 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
 
   function toggleRemove(productId) {
     setDraft((prev) =>
-      prev
-        .map((it) => (it.productId === productId ? { ...it, removed: !it.removed } : it))
-        .filter((it) => !(it.productId === productId && it.added && it.removed)),
+      prev.map((it) =>
+        it.productId === productId ? { ...it, removed: !it.removed } : it,
+      ),
     );
   }
 
   const hasChanges = (() => {
     const orig = new Map((localItems || []).map((it) => [it.productId, it]));
     return draft.some((it) => {
-      if (it.added && !it.removed) return true;
       const o = orig.get(it.productId);
       if (!o) return false;
       if (it.removed) return true;
@@ -302,7 +271,7 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
             onClick={startEdit}
             className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition"
           >
-            {order.status === "Validar disponibilidad" ? "Validar disponibilidad" : "Modificar pedido"}
+            Validar disponibilidad
           </button>
         )}
       </div>
@@ -337,11 +306,10 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
             ))}
 
             {editing && draft.map((item) => (
-              <tr key={item.productId} className={item.removed ? "bg-red-50" : item.added ? "bg-emerald-50" : "hover:bg-gray-50"}>
+              <tr key={item.productId} className={item.removed ? "bg-red-50" : "hover:bg-gray-50"}>
                 <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{item.sku || getSku(item.productId)}</td>
                 <td className={`px-5 py-3 text-sm font-medium ${item.removed ? "line-through text-gray-400" : "text-gray-800"}`}>
                   {item.productName}
-                  {item.added && <span className="ml-2 text-[10px] font-semibold uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">nuevo</span>}
                 </td>
                 <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                 <td className="px-5 py-3 text-sm text-gray-700 text-center">
@@ -400,35 +368,6 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
 
       {editing && (
         <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 space-y-3">
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Agregar un producto</label>
-            <input
-              value={prodQuery}
-              onChange={(e) => setProdQuery(e.target.value)}
-              placeholder="Buscar por nombre o SKU…"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            {prodResults.length > 0 && (
-              <div className="mt-1 border border-gray-200 rounded-lg bg-white max-h-44 overflow-y-auto">
-                {prodResults.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => addDraftProduct(p)}
-                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 transition"
-                  >
-                    <span className="truncate">
-                      <span className="font-mono text-xs text-gray-400 mr-2">{p.sku}</span>{p.name}
-                    </span>
-                    <span className="text-xs text-gray-500 whitespace-nowrap">
-                      {formatCOP(p.price)} · {ivaRateLabel(p.ivaRate ?? p.iva_rate ?? 19)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <p className="text-[11px] text-gray-400 mt-1">El precio final de los productos agregados lo confirma el sistema al guardar.</p>
-          </div>
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">
               Motivo de la modificacion <span className="text-red-500">*</span>

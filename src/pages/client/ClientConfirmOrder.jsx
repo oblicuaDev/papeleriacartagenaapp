@@ -16,20 +16,12 @@ export default function ClientConfirmOrder() {
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [savingDraft, setSavingDraft] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
 
-  async function handleSaveDraft() {
-    setErrorMsg(null);
-    setSavingDraft(true);
-    try {
-      await submitOrder(currentUser.id, null, notes, { draft: true });
-      navigate('/cliente/pedidos');
-    } catch (err) {
-      setErrorMsg(err?.message || 'No se pudo guardar el borrador');
-    } finally {
-      setSavingDraft(false);
-    }
+  // "Guardar borrador" = dejar el carrito como está y volver al catálogo.
+  // El carrito se conserva solo (localStorage), no se crea ningún pedido.
+  function handleSaveDraft() {
+    navigate('/cliente');
   }
 
   async function handleSubmit() {
@@ -212,15 +204,15 @@ export default function ClientConfirmOrder() {
       <div className="flex flex-col sm:flex-row gap-3">
         <button
           onClick={handleSaveDraft}
-          disabled={submitting || savingDraft}
-          className="sm:w-56 flex items-center justify-center gap-2 py-4 border border-gray-300 text-gray-700 rounded-xl text-base font-semibold hover:bg-gray-50 disabled:opacity-50 transition"
+          disabled={submitting}
+          className="sm:w-64 flex items-center justify-center gap-2 py-4 border border-gray-300 text-gray-700 rounded-xl text-base font-semibold hover:bg-gray-50 disabled:opacity-50 transition"
         >
           <Save className="w-4 h-4" />
-          {savingDraft ? 'Guardando...' : 'Guardar borrador'}
+          Guardar borrador
         </button>
         <button
           onClick={handleSubmit}
-          disabled={submitting || savingDraft}
+          disabled={submitting}
           className="flex-1 py-4 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-300 text-white rounded-xl text-base font-bold transition shadow-sm"
         >
           {submitting ? 'Enviando...' : 'Enviar mi pedido'}

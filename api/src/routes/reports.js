@@ -1,17 +1,34 @@
-// reports.js — Generador dinamico de reportes (solo admin).
+// reports.js — Generador dinamico de reportes.
 //
-// El admin arma el reporte: elige el dataset, que columnas, rango de fechas
+// El usuario arma el reporte: elige el dataset, que columnas, rango de fechas
 // DESDE/HASTA y cuantos registros. Cada dataset se define abajo con su FROM,
-// su whitelist de columnas (key -> { header, sql, numFmt? }) y sus filtros
-// permitidos. Nada de esto se interpola sin parametrizar.
+// su whitelist de columnas (key -> { header, sql, numFmt? }), sus filtros
+// permitidos y `scopeCol` (columna para acotar por empresa). Nada de esto se
+// interpola sin parametrizar.
+//
+// Acceso: admin (todo) y los roles cliente admin_empresa / administrador_contrato
+// (solo su empresa: se fuerza `scopeCol = su companyId`).
 
 import { Router } from 'express';
 import pool from '../config/db.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAuth } from '../middleware/auth.js';
 import { buildReportCsv, buildReportXlsx } from '../lib/reportExport.js';
 
 const router = Router();
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth);
+
+// Gate: admin o administrador de empresa/contrato.
+const COMPANY_REPORT_ROLES = ['admin_empresa', 'administrador_contrato'];
+router.use((req, res, next) => {
+  if (req.user.role === 'admin') return next();
+  if (req.user.role === 'client' && COMPANY_REPORT_ROLES.includes(req.user.clientRole)) return next();
+  return res.status(403).json({ error: 'No autorizado para este recurso' });
+});
+
+// null para admin (sin acotar); companyId para administradores de empresa.
+function scopeCompanyId(req) {
+  return req.user.role === 'admin' ? null : req.user.companyId;
+}
 
 const MONEY = '"$"#,##0';
 
@@ -38,6 +55,7 @@ const DATASETS = {
       LEFT JOIN users ua     ON ua.id = o.advisor_id
       LEFT JOIN users ud     ON ud.id = o.delivery_id`,
     dateColumn: 'o.created_at',
+    scopeCol: 'uc.company_id',
     columns: {
       id:           { header: 'ID',          sql: 'o.id' },
       status:       { header: 'Estado',      sql: 'o.status' },
@@ -80,6 +98,7 @@ const DATASETS = {
       LEFT JOIN categories cat ON cat.id = p.category_id
       LEFT JOIN gran_categorias gc ON gc.id = cat.gran_categoria_id`,
     dateColumn: 'o.created_at',
+    scopeCol: 'uc.company_id',
     columns: {
       order_id:       { header: 'Pedido',      sql: 'oi.order_id' },
       order_status:   { header: 'Estado pedido', sql: 'o.status' },
@@ -139,6 +158,7 @@ const DATASETS = {
       LEFT JOIN companies c  ON c.id = u.company_id
       LEFT JOIN sucursales s ON s.id = u.sucursal_id`,
     dateColumn: 'u.created_at',
+    scopeCol: 'u.company_id',
     columns: {
       name:        { header: 'Nombre',    sql: 'u.name' },
       email:       { header: 'Email',     sql: 'u.email' },
@@ -162,11 +182,20 @@ const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 50000;
 
 // Construye { where, params, columns[] } comun a count y export.
-function buildQuery(ds, query) {
+// `forceCompanyId` (o null) acota el dataset a una empresa.
+function buildQuery(ds, query, forceCompanyId) {
   const params = [];
   const conds = [];
+  const scoped = forceCompanyId != null;
+
+  // Scope forzado por empresa (administradores de empresa/contrato).
+  if (scoped && ds.scopeCol) {
+    conds.push(`${ds.scopeCol} = $${params.push(parseInt(forceCompanyId, 10))}`);
+  }
 
   for (const [key, fn] of Object.entries(ds.filters)) {
+    // Con scope forzado, ignorar filtros que el usuario no debe controlar.
+    if (scoped && (key === 'companyId' || key === 'advisorId')) continue;
     const val = query[key];
     if (val !== undefined && val !== '' && val !== null) {
       conds.push(fn(val, params));
@@ -198,7 +227,7 @@ router.get('/:dataset', async (req, res) => {
   const ds = DATASETS[req.params.dataset];
   if (!ds) return res.status(422).json({ error: 'dataset desconocido' });
 
-  const { where, params, keys } = buildQuery(ds, req.query);
+  const { where, params, keys } = buildQuery(ds, req.query, scopeCompanyId(req));
 
   try {
     if (req.query.count === '1' || req.query.count === 'true') {
@@ -254,14 +283,18 @@ router.get('/:dataset', async (req, res) => {
 });
 
 // GET /reports  -> metadata para que el frontend arme el formulario
-router.get('/', (_req, res) => {
+router.get('/', (req, res) => {
+  const scoped = scopeCompanyId(req) != null;
   const meta = Object.fromEntries(
     Object.entries(DATASETS).map(([key, ds]) => [
       key,
       {
         label: ds.sheet,
         columns: Object.entries(ds.columns).map(([k, c]) => ({ key: k, header: c.header })),
-        filters: Object.keys(ds.filters),
+        // Los administradores de empresa no eligen empresa/asesor: se fuerza su empresa.
+        filters: Object.keys(ds.filters).filter(
+          (f) => !(scoped && (f === 'companyId' || f === 'advisorId')),
+        ),
       },
     ])
   );

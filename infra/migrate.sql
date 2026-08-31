@@ -187,7 +187,6 @@ CREATE TABLE IF NOT EXISTS orders (
     updated_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_order_status CHECK (
         status IN (
-            'Borrador',
             'Pendiente por aprobar',
             'Rechazado',
             'Pendiente',
@@ -329,7 +328,6 @@ CREATE TABLE IF NOT EXISTS order_status_log (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_osl_to_status CHECK (
         to_status IN (
-            'Borrador',
             'Pendiente por aprobar',
             'Rechazado',
             'Pendiente',
@@ -393,7 +391,7 @@ CREATE TABLE IF NOT EXISTS order_item_changes (
     reason          TEXT           NOT NULL,
     changed_by      INTEGER        REFERENCES users(id) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-    CONSTRAINT chk_oic_action CHECK (action IN ('updated', 'removed', 'added'))
+    CONSTRAINT chk_oic_action CHECK (action IN ('updated', 'removed'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_oic_order      ON order_item_changes(order_id, created_at);
@@ -491,15 +489,12 @@ ALTER TABLE users ADD  CONSTRAINT chk_client_role
 ALTER TABLE users ADD COLUMN IF NOT EXISTS all_orders_access BOOLEAN NOT NULL DEFAULT false;
 
 -- ----------------------------------------------------------
--- 20. IVA configurable por producto + estado 'Borrador' (migración 018).
+-- 20. IVA configurable por producto (migración 018).
 --     - products.iva_rate / order_items.iva_rate: tasa de IVA (0 exento,
 --       5% o 19%). Por defecto 19. order_items congela la tasa al crear
 --       el pedido (snapshot histórico).
 --     - orders.iva_19 / iva_5 / iva_exento_base: desglose del IVA por tasa
 --       para los indicadores de los dashboards. iva = iva_5 + iva_19.
---     - 'Borrador': pedido guardado sin enviar (aparece en "Mis Pedidos"
---       de su creador, no llega al asesor hasta confirmarse).
---     - order_item_changes.action gana 'added' (añadir productos al editar).
 -- ----------------------------------------------------------
 ALTER TABLE products    ADD COLUMN IF NOT EXISTS iva_rate NUMERIC(4, 2) NOT NULL DEFAULT 19;
 ALTER TABLE order_items ADD COLUMN IF NOT EXISTS iva_rate NUMERIC(4, 2) NOT NULL DEFAULT 19;
@@ -518,20 +513,6 @@ UPDATE orders SET iva_19 = iva WHERE iva_19 = 0 AND iva > 0;
 
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_orders_iva_split;
 ALTER TABLE orders ADD  CONSTRAINT chk_orders_iva_split CHECK (iva_5 + iva_19 = iva);
-
--- Constraints de estado: incluir 'Borrador' en instalaciones previas.
-ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_order_status;
-ALTER TABLE orders ADD  CONSTRAINT chk_order_status CHECK (
-    status IN ('Borrador', 'Pendiente por aprobar', 'Rechazado', 'Pendiente',
-               'Validar disponibilidad', 'Alistamiento', 'En Ruta', 'Entregado')
-);
-ALTER TABLE order_status_log DROP CONSTRAINT IF EXISTS chk_osl_to_status;
-ALTER TABLE order_status_log ADD  CONSTRAINT chk_osl_to_status CHECK (
-    to_status IN ('Borrador', 'Pendiente por aprobar', 'Rechazado', 'Pendiente',
-                  'Validar disponibilidad', 'Alistamiento', 'En Ruta', 'Entregado')
-);
-ALTER TABLE order_item_changes DROP CONSTRAINT IF EXISTS chk_oic_action;
-ALTER TABLE order_item_changes ADD  CONSTRAINT chk_oic_action CHECK (action IN ('updated', 'removed', 'added'));
 
 -- ----------------------------------------------------------
 -- Función auxiliar: generar ID de pedido (ORD-00001)

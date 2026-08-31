@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, ExternalLink, Repeat, Filter, X, FileEdit, Trash2 } from 'lucide-react';
+import { Package, ExternalLink, Repeat, Filter, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { STATUS_STYLES, formatCOP, statusLabel, splitIva } from '../../data/mockData';
@@ -13,7 +13,6 @@ const IN_DELIVERY_STATUSES = ['Alistamiento', 'En Ruta'];
 // 'Aprobados' incluye 'Validar disponibilidad' (flujo nuevo) y 'Pendiente' (legacy).
 const ORDER_TABS = [
   { value: 'all',         label: 'Todos' },
-  { value: 'draft',       label: 'Borradores', statuses: ['Borrador'] },
   { value: 'pending',     label: 'Pendientes', statuses: ['Pendiente por aprobar'] },
   { value: 'approved',    label: 'Aprobados',  statuses: ['Validar disponibilidad', 'Pendiente'] },
   { value: 'in_delivery', label: 'En entrega', statuses: IN_DELIVERY_STATUSES },
@@ -21,7 +20,6 @@ const ORDER_TABS = [
 ];
 
 const ALL_STATUSES = [
-  'Borrador',
   'Pendiente por aprobar',
   'Rechazado',
   'Pendiente',
@@ -32,7 +30,7 @@ const ALL_STATUSES = [
 ];
 
 export default function ClientOrders() {
-  const { orders, users, companies, addToCart, clearCart, resumeDraft, refreshOrders } = useApp();
+  const { orders, users, companies, addToCart, clearCart } = useApp();
   const { currentUser }   = useAuth();
   const navigate          = useNavigate();
   const isReadOnly        = currentUser?.clientRole === 'admin_empresa';
@@ -146,27 +144,6 @@ export default function ClientOrders() {
   }
 
   const hasActiveFilters = creatorId || statusFilter || sucursalId || orderIdQuery || dateFrom || dateTo;
-
-  async function handleContinueDraft(e, orderId) {
-    e.stopPropagation();
-    try {
-      await resumeDraft(orderId);
-      navigate('/cliente/confirmar-pedido');
-    } catch (err) {
-      alert(err?.message || 'No se pudo abrir el borrador');
-    }
-  }
-
-  async function handleDeleteDraft(e, orderId) {
-    e.stopPropagation();
-    if (!window.confirm(`¿Eliminar el borrador ${orderId}?`)) return;
-    try {
-      await ordersApi.remove(orderId);
-      await refreshOrders();
-    } catch (err) {
-      alert(err?.message || 'No se pudo eliminar el borrador');
-    }
-  }
 
   async function handleRepeatOrder(e, orderId) {
     e.stopPropagation();
@@ -415,43 +392,22 @@ export default function ClientOrders() {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
-                        {order.status === 'Borrador' ? (
-                          <>
-                            <button
-                              onClick={e => handleContinueDraft(e, order.id)}
-                              className="flex items-center gap-1 text-xs text-blue-700 font-medium hover:text-blue-800 transition"
-                            >
-                              <FileEdit className="w-3.5 h-3.5" />
-                              Continuar
-                            </button>
-                            <button
-                              onClick={e => handleDeleteDraft(e, order.id)}
-                              className="flex items-center gap-1 text-xs text-red-600 font-medium hover:text-red-700 transition"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                              Eliminar
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              onClick={e => { e.stopPropagation(); navigate(`/cliente/pedidos/${order.id}`); }}
-                              className="flex items-center gap-1 text-xs text-blue-700 font-medium hover:text-blue-800 transition"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" />
-                              Ver detalle
-                            </button>
-                            {!isReadOnly && (
-                              <button
-                                onClick={e => handleRepeatOrder(e, order.id)}
-                                title="Repetir este pedido"
-                                className="flex items-center gap-1 text-xs text-emerald-700 font-medium hover:text-emerald-800 transition"
-                              >
-                                <Repeat className="w-3.5 h-3.5" />
-                                Repetir
-                              </button>
-                            )}
-                          </>
+                        <button
+                          onClick={e => { e.stopPropagation(); navigate(`/cliente/pedidos/${order.id}`); }}
+                          className="flex items-center gap-1 text-xs text-blue-700 font-medium hover:text-blue-800 transition"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Ver detalle
+                        </button>
+                        {!isReadOnly && (
+                          <button
+                            onClick={e => handleRepeatOrder(e, order.id)}
+                            title="Repetir este pedido"
+                            className="flex items-center gap-1 text-xs text-emerald-700 font-medium hover:text-emerald-800 transition"
+                          >
+                            <Repeat className="w-3.5 h-3.5" />
+                            Repetir
+                          </button>
                         )}
                       </div>
                     </td>

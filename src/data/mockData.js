@@ -145,7 +145,6 @@ export const ORDER_STATUSES = ['Pendiente', 'Validar disponibilidad', 'Alistamie
 
 // Label visible al usuario (estado interno → texto en UI)
 export const STATUS_LABELS = {
-  'Borrador':              'Borrador',
   'Pendiente por aprobar': 'Pendiente por aprobar',
   'Pendiente':             'Aprobado',
   'Rechazado':             'Rechazado',
@@ -160,7 +159,6 @@ export function statusLabel(status) {
 }
 
 export const STATUS_STYLES = {
-  'Borrador': { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200' },
   'Pendiente por aprobar': { bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-200' },
   'Pendiente': { bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-200' },
   'Rechazado': { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200' },

@@ -68,12 +68,11 @@ router.get('/', async (req, res) => {
     // Con cobertura total (Direccion Comercial) ve los pedidos de todos los
     // asesores; sin ella, solo los suyos.
     if (!allOrders) conditions.push(`o.advisor_id = $${params.push(myId)}`);
-    conditions.push(`o.status NOT IN ('Borrador', 'Pendiente por aprobar', 'Rechazado')`);
+    conditions.push(`o.status NOT IN ('Pendiente por aprobar', 'Rechazado')`);
   } else if (role === 'client' && clientRole === 'creador_pedidos') {
     conditions.push(`o.client_id = $${params.push(myId)}`);
   } else if (role === 'client' && clientRole === 'supervisor') {
-    // PHASE 3: supervisor solo ve pedidos de su sucursal.
-    // Los borradores son privados de su creador hasta confirmarse.
+    // PHASE 3: supervisor solo ve pedidos de su sucursal
     conditions.push(
       `o.client_id IN (
          SELECT u.id FROM users u
@@ -81,13 +80,11 @@ router.get('/', async (req, res) => {
            AND u.sucursal_id = $${params.push(req.user.sucursalId ?? null)}
        )`
     );
-    conditions.push(`(o.status <> 'Borrador' OR o.client_id = $${params.push(myId)})`);
   } else if (role === 'client' && (clientRole === 'admin_empresa' || clientRole === 'administrador_contrato')) {
     // PHASE 3: admin_empresa/administrador_contrato ven pedidos de TODAS las sucursales de su empresa
     conditions.push(
       `o.client_id IN (SELECT id FROM users WHERE company_id = $${params.push(companyId)})`
     );
-    conditions.push(`(o.status <> 'Borrador' OR o.client_id = $${params.push(myId)})`);
   } else if (role === 'delivery') {
     // PHASE 5: delivery solo ve pedidos asignados a él en estados operativos
     conditions.push(`o.delivery_id = $${params.push(myId)}`);
@@ -157,17 +154,12 @@ router.get('/', async (req, res) => {
 async function canViewOrder(req, order) {
   const { role, id: myId, companyId, clientRole, sucursalId } = req.user;
   if (role === 'admin') return true;
-  if (role === 'advisor') {
-    return order.status !== 'Borrador' &&
-           (req.user.allOrdersAccess || order.advisor_id === myId);
-  }
+  if (role === 'advisor') return req.user.allOrdersAccess || order.advisor_id === myId;
   if (role === 'delivery') {
     return order.delivery_id === myId &&
            DELIVERY_VISIBLE_STATUSES.includes(order.status);
   }
   if (role === 'client') {
-    // Un borrador solo lo ve su creador.
-    if (order.status === 'Borrador') return order.client_id === myId;
     const { rows } = await pool.query(
       `SELECT company_id, sucursal_id FROM users WHERE id = $1`, [order.client_id]
     );
@@ -469,7 +461,7 @@ router.post('/', requireRole('client'), async (req, res) => {
     return res.status(403).json({ error: 'admin_empresa no puede crear pedidos' });
   }
 
-  const { items, draft = false } = req.body;
+  const { items } = req.body;
   let { notes } = req.body;
 
   // ── Validacion de payload ────────────────────────────────
@@ -517,22 +509,12 @@ router.post('/', requireRole('client'), async (req, res) => {
   // aprobado. 'Pendiente' quedo reservado como estado legacy (ver
   // VALID_TRANSITIONS): usarlo aqui dejaba el pedido fuera del alcance del
   // asesor, que solo puede validar disponibilidad de pedidos en ese estado.
-  const initialStatus = draft
-    ? 'Borrador'
-    : (clientRole === 'supervisor' || clientRole === 'administrador_contrato')
-      ? 'Validar disponibilidad' : 'Pendiente por aprobar';
+  const initialStatus = (clientRole === 'supervisor' || clientRole === 'administrador_contrato')
+    ? 'Validar disponibilidad' : 'Pendiente por aprobar';
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    // Un borrador por usuario: al guardar uno nuevo se descarta el anterior.
-    if (draft) {
-      await client.query(
-        `DELETE FROM orders WHERE client_id = $1 AND status = 'Borrador'`,
-        [clientId]
-      );
-    }
 
     // Routing del pedido + cadena de fallback de listas
     const { priceListId: orderPriceListId, priceListChain, advisorId: orderAdvisorId } =
@@ -916,13 +898,11 @@ router.put('/:id', async (req, res) => {
 });
 
 // Estados en los que un pedido todavia se puede editar (antes de Alistamiento).
-const ITEM_EDITABLE_STATUSES = ['Borrador', 'Pendiente por aprobar', 'Pendiente', 'Validar disponibilidad'];
+const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente', 'Validar disponibilidad'];
 
 // PUT /orders/:id/items
 // Modificacion de items mientras el pedido no ha entrado a Alistamiento.
-// Permite cambiar cantidades, eliminar items Y agregar productos nuevos
-// (el precio y la tasa de IVA de los nuevos los resuelve el backend con las
-// mismas reglas que POST /orders: routing de listas + contrato vigente).
+// Permite cambiar cantidades o eliminar items (no agregar productos nuevos).
 // Autorizado para: admin/asesor (sin restriccion de scope, ademas del check
 // de asesor asignado mas abajo), el gestor del pedido (solo el suyo),
 // supervisor (su sucursal) y administrador_contrato (toda su empresa).
@@ -1017,50 +997,15 @@ router.put('/:id/items', async (req, res) => {
     const existingByProduct = new Map();
     for (const it of existing) existingByProduct.set(it.product_id, it);
 
-    // Productos nuevos (no estaban en el pedido) -> se resuelven contra el
-    // catalogo con las mismas reglas que POST /orders.
-    const newProductIds = [...desiredByProduct.keys()].filter(pid => !existingByProduct.has(pid));
-    const resolvedNew = []; // { productId, productName, sku, unit, unitPrice, ivaRate, quantity }
-    if (newProductIds.length) {
-      const { rows: cliRows } = await client.query(
-        `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
-      );
-      const orderCompanyId = cliRows[0]?.company_id ?? null;
-      const contractProductIds = await resolveActiveContractProductIds(orderCompanyId, client);
-
-      const { priceListChain } = await resolveOrderRouting(order.client_id, client);
-      const listIdParams = priceListChain.map((_, i) => `$${i + 2}`);
-      const { select: priceSelect, join: priceJoin } = priceSqlFragmentChain({ alias: 'p', listIdParams });
-
-      for (const pid of newProductIds) {
-        if (contractProductIds && !contractProductIds.has(pid)) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({ error: `El producto ${pid} esta fuera del contrato vigente de la empresa` });
-        }
-        const { rows: pr } = await client.query(
-          `SELECT p.id, p.name, p.sku, p.unit, p.active, p.iva_rate,
-                  ${priceSelect} AS backend_price
-           FROM products p ${priceJoin} WHERE p.id = $1`,
-          [pid, ...priceListChain]
-        );
-        const prod = pr[0];
-        if (!prod || !prod.active) {
-          await client.query('ROLLBACK');
-          return res.status(prod ? 409 : 404).json({ error: `Producto ${pid} ${prod ? 'inactivo' : 'no encontrado'}` });
-        }
-        const price = Number(prod.backend_price);
-        if (!Number.isFinite(price) || price <= 0) {
-          await client.query('ROLLBACK');
-          return res.status(500).json({ error: `Precio no resoluble para el producto ${pid}` });
-        }
-        resolvedNew.push({
-          productId: prod.id, productName: prod.name, sku: prod.sku, unit: prod.unit,
-          unitPrice: price, ivaRate: Number(prod.iva_rate), quantity: desiredByProduct.get(pid),
-        });
+    // Solo se modifican/eliminan items existentes (no se agregan nuevos).
+    for (const pid of desiredByProduct.keys()) {
+      if (!existingByProduct.has(pid)) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({ error: `productId ${pid} no pertenece al pedido` });
       }
     }
 
-    // Calcular cambios (updates, removes y added)
+    // Calcular cambios (updates y removes)
     const changes = [];
 
     for (const it of existing) {
@@ -1078,12 +1023,6 @@ router.put('/:id/items', async (req, res) => {
         });
       }
     }
-    for (const np of resolvedNew) {
-      changes.push({
-        action: 'added', productId: np.productId, productName: np.productName, sku: np.sku,
-        prevQuantity: null, newQuantity: np.quantity, prevUnitPrice: null, newUnitPrice: np.unitPrice,
-      });
-    }
 
     if (!changes.length) {
       await client.query('ROLLBACK');
@@ -1091,8 +1030,7 @@ router.put('/:id/items', async (req, res) => {
     }
 
     // Validar que quede al menos un item en el pedido
-    const remainingItems =
-      existing.filter(it => desiredByProduct.has(it.product_id)).length + resolvedNew.length;
+    const remainingItems = existing.filter(it => desiredByProduct.has(it.product_id)).length;
     if (remainingItems === 0) {
       await client.query('ROLLBACK');
       return res.status(422).json({
@@ -1107,19 +1045,11 @@ router.put('/:id/items', async (req, res) => {
           `DELETE FROM order_items WHERE order_id = $1 AND product_id = $2`,
           [orderId, ch.productId]
         );
-      } else if (ch.action === 'updated') {
+      } else {
         await client.query(
           `UPDATE order_items SET quantity = $1
            WHERE order_id = $2 AND product_id = $3`,
           [ch.newQuantity, orderId, ch.productId]
-        );
-      } else {
-        // added: nuevo item con precio y tasa resueltos por el backend
-        const np = resolvedNew.find(n => n.productId === ch.productId);
-        await client.query(
-          `INSERT INTO order_items (order_id, product_id, product_name, sku, quantity, unit_price, unit, iva_rate)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [orderId, np.productId, np.productName, np.sku, np.quantity, np.unitPrice, np.unit, np.ivaRate]
         );
       }
 
@@ -1138,15 +1068,12 @@ router.put('/:id/items', async (req, res) => {
     }
 
     // Estado final de lineas -> recalcular total + discriminacion de IVA por tasa
-    const finalLines = [
-      ...existing
-        .filter(it => desiredByProduct.has(it.product_id))
-        .map(it => ({
-          lineTotal: Number(it.unit_price) * desiredByProduct.get(it.product_id),
-          ivaRate: Number(it.iva_rate),
-        })),
-      ...resolvedNew.map(np => ({ lineTotal: np.unitPrice * np.quantity, ivaRate: np.ivaRate })),
-    ];
+    const finalLines = existing
+      .filter(it => desiredByProduct.has(it.product_id))
+      .map(it => ({
+        lineTotal: Number(it.unit_price) * desiredByProduct.get(it.product_id),
+        ivaRate: Number(it.iva_rate),
+      }));
     const {
       total: newTotal, subtotal: newSubtotal, iva: newIva,
       iva5: newIva5, iva19: newIva19, exentoBase: newExento,
@@ -1163,9 +1090,7 @@ router.put('/:id/items', async (req, res) => {
     const summary = changes.map(c =>
       c.action === 'removed'
         ? `eliminado: ${c.productName}`
-        : c.action === 'added'
-          ? `agregado: ${c.productName} x${c.newQuantity}`
-          : `${c.productName}: ${c.prevQuantity} -> ${c.newQuantity}`
+        : `${c.productName}: ${c.prevQuantity} -> ${c.newQuantity}`
     ).join('; ');
     await client.query(
       `INSERT INTO order_comments (order_id, author_id, text)
@@ -1175,19 +1100,16 @@ router.put('/:id/items', async (req, res) => {
 
     await client.query('COMMIT');
 
-    // Regenerar PO PDF (fuera de la transaccion para no bloquear).
-    // Los borradores no tienen orden de compra hasta que se confirman.
+    // Regenerar PO PDF (fuera de la transaccion para no bloquear)
     let warnings;
-    if (order.status !== 'Borrador') {
-      try {
-        await ensurePurchaseOrderPdf(orderId, myId, pool, { regenerate: true });
-      } catch (pdfErr) {
-        console.error(`[orders] No se pudo regenerar PDF tras edicion de items en ${orderId}:`, pdfErr);
-        warnings = ['No se pudo regenerar la orden de compra'];
-      }
+    try {
+      await ensurePurchaseOrderPdf(orderId, myId, pool, { regenerate: true });
+    } catch (pdfErr) {
+      console.error(`[orders] No se pudo regenerar PDF tras edicion de items en ${orderId}:`, pdfErr);
+      warnings = ['No se pudo regenerar la orden de compra'];
     }
 
-    // Estado final de items para que el frontend refresque sin adivinar precios.
+    // Estado final de items para que el frontend refresque tras la edicion.
     const { rows: finalItems } = await pool.query(
       `SELECT product_id AS "productId", product_name AS "productName", sku,
               quantity, unit_price AS "unitPrice", unit, iva_rate AS "ivaRate"
@@ -1213,134 +1135,6 @@ router.put('/:id/items', async (req, res) => {
     return res.status(500).json({ error: 'Error interno del servidor' });
   } finally {
     client.release();
-  }
-});
-
-// POST /orders/:id/confirm — convierte un Borrador en un pedido real.
-// Revalida precios y contrato contra el catalogo actual (los precios frozen
-// se refrescan al confirmar) y transiciona al estado inicial segun el rol
-// del cliente dueño del borrador.
-router.post('/:id/confirm', requireRole('client'), async (req, res) => {
-  const { id: myId, role } = req.user;
-  const orderId = req.params.id.toUpperCase();
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const { rows: orderRows } = await client.query(
-      `SELECT o.* FROM orders o WHERE o.id = $1 FOR UPDATE`, [orderId]
-    );
-    const order = orderRows[0];
-    if (!order) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Pedido no encontrado' }); }
-    if (order.status !== 'Borrador') {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'El pedido ya no es un borrador' });
-    }
-    if (order.client_id !== myId && role !== 'admin') {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-
-    const { rows: cliRows } = await client.query(
-      `SELECT company_id, client_role FROM users WHERE id = $1`, [order.client_id]
-    );
-    const orderCompanyId = cliRows[0]?.company_id ?? null;
-    const clientRoleOfOwner = cliRows[0]?.client_role ?? null;
-
-    const { rows: items } = await client.query(
-      `SELECT * FROM order_items WHERE order_id = $1 ORDER BY id`, [orderId]
-    );
-    if (!items.length) {
-      await client.query('ROLLBACK');
-      return res.status(422).json({ error: 'El borrador no tiene productos' });
-    }
-
-    const contractProductIds = await resolveActiveContractProductIds(orderCompanyId, client);
-    const { priceListChain } = await resolveOrderRouting(order.client_id, client);
-    const listIdParams = priceListChain.map((_, i) => `$${i + 2}`);
-    const { select: priceSelect, join: priceJoin } = priceSqlFragmentChain({ alias: 'p', listIdParams });
-
-    const finalLines = [];
-    for (const it of items) {
-      if (contractProductIds && !contractProductIds.has(it.product_id)) {
-        await client.query('ROLLBACK');
-        return res.status(409).json({ error: `"${it.product_name}" ya no esta en el contrato vigente. Quitalo del borrador.` });
-      }
-      const { rows: pr } = await client.query(
-        `SELECT p.active, p.iva_rate, ${priceSelect} AS backend_price
-         FROM products p ${priceJoin} WHERE p.id = $1`,
-        [it.product_id, ...priceListChain]
-      );
-      if (!pr[0] || !pr[0].active) {
-        await client.query('ROLLBACK');
-        return res.status(409).json({ error: `"${it.product_name}" ya no esta disponible. Quitalo del borrador.` });
-      }
-      const price = Number(pr[0].backend_price);
-      const rate = Number(pr[0].iva_rate);
-      if (Number(it.unit_price) !== price || Number(it.iva_rate) !== rate) {
-        await client.query(
-          `UPDATE order_items SET unit_price = $1, iva_rate = $2 WHERE id = $3`,
-          [price, rate, it.id]
-        );
-      }
-      finalLines.push({ lineTotal: price * it.quantity, ivaRate: rate });
-    }
-
-    const agg = aggregateOrderIva(finalLines);
-    const targetStatus = (clientRoleOfOwner === 'supervisor' || clientRoleOfOwner === 'administrador_contrato')
-      ? 'Validar disponibilidad' : 'Pendiente por aprobar';
-
-    await client.query(
-      `UPDATE orders
-          SET status = $1, total = $2, subtotal = $3, iva = $4,
-              iva_5 = $5, iva_19 = $6, iva_exento_base = $7
-        WHERE id = $8`,
-      [targetStatus, agg.total, agg.subtotal, agg.iva, agg.iva5, agg.iva19, agg.exentoBase, orderId]
-    );
-    await client.query(
-      `INSERT INTO order_status_log (order_id, from_status, to_status, changed_by)
-       VALUES ($1, 'Borrador', $2, $3)`,
-      [orderId, targetStatus, myId]
-    );
-
-    await client.query('COMMIT');
-
-    if (targetStatus === 'Validar disponibilidad') {
-      try { await ensurePurchaseOrderPdf(orderId, myId); }
-      catch (e) { console.error(`[orders] PDF confirm ${orderId}:`, e); }
-    }
-
-    return res.json({ id: orderId, status: targetStatus, ...agg });
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch {}
-    console.error(err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
-  } finally {
-    client.release();
-  }
-});
-
-// DELETE /orders/:id — solo borradores, por su dueño o un admin.
-router.delete('/:id', async (req, res) => {
-  const { id: myId, role } = req.user;
-  const orderId = req.params.id.toUpperCase();
-  try {
-    const { rows } = await pool.query(
-      `SELECT client_id, status FROM orders WHERE id = $1`, [orderId]
-    );
-    if (!rows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
-    if (rows[0].status !== 'Borrador') {
-      return res.status(409).json({ error: 'Solo se pueden eliminar borradores' });
-    }
-    if (rows[0].client_id !== myId && role !== 'admin') {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-    await pool.query(`DELETE FROM orders WHERE id = $1`, [orderId]);
-    return res.status(204).send();
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
 

@@ -1,13 +1,10 @@
 -- =============================================================
--- 018_iva_rate_and_draft.sql
+-- 018_iva_rate.sql  (nombre histórico: 018_iva_rate_and_draft)
 --   - products.iva_rate / order_items.iva_rate: tasa de IVA por
 --     producto (0 exento, 5% o 19%). Por defecto 19. order_items
 --     congela la tasa al crear el pedido (snapshot histórico).
 --   - orders.iva_19 / iva_5 / iva_exento_base: desglose del IVA por
 --     tasa para los indicadores de los dashboards. iva = iva_5 + iva_19.
---   - Estado 'Borrador': pedido guardado sin enviar. Aparece en
---     "Mis Pedidos" de su creador; no llega al asesor hasta confirmarse.
---   - order_item_changes.action gana 'added' (añadir productos al editar).
 -- Idempotente.
 --
 -- NOTA: historial/documentación. El cambio real ya está fusionado en
@@ -32,18 +29,5 @@ UPDATE orders SET iva_19 = iva WHERE iva_19 = 0 AND iva > 0;
 
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_orders_iva_split;
 ALTER TABLE orders ADD  CONSTRAINT chk_orders_iva_split CHECK (iva_5 + iva_19 = iva);
-
-ALTER TABLE orders DROP CONSTRAINT IF EXISTS chk_order_status;
-ALTER TABLE orders ADD  CONSTRAINT chk_order_status CHECK (
-    status IN ('Borrador', 'Pendiente por aprobar', 'Rechazado', 'Pendiente',
-               'Validar disponibilidad', 'Alistamiento', 'En Ruta', 'Entregado')
-);
-ALTER TABLE order_status_log DROP CONSTRAINT IF EXISTS chk_osl_to_status;
-ALTER TABLE order_status_log ADD  CONSTRAINT chk_osl_to_status CHECK (
-    to_status IN ('Borrador', 'Pendiente por aprobar', 'Rechazado', 'Pendiente',
-                  'Validar disponibilidad', 'Alistamiento', 'En Ruta', 'Entregado')
-);
-ALTER TABLE order_item_changes DROP CONSTRAINT IF EXISTS chk_oic_action;
-ALTER TABLE order_item_changes ADD  CONSTRAINT chk_oic_action CHECK (action IN ('updated', 'removed', 'added'));
 
 COMMIT;

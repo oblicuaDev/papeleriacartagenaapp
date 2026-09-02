@@ -87,14 +87,20 @@ export function AppProvider({ children }) {
       setOrders([]);
       setCompanies([]);
       setUsers([]);
-      clearCart();
+      // El carrito NO se borra en logout: queda como borrador en localStorage
+      // (junto al userId dueno) para recuperarlo al volver a entrar con la
+      // misma cuenta. Solo lo sacamos de memoria.
+      setCart([]);
       return;
     }
 
-    // Si el carrito guardado pertenece a otra cuenta, descartarlo.
+    // Sesion activa: si hay un borrador guardado de OTRA cuenta en este
+    // navegador, descartarlo; si es de esta misma cuenta, recuperarlo.
     const stored = loadStoredCart();
     if (stored.userId != null && stored.userId !== currentUser.id) {
       clearCart();
+    } else if (stored.userId === currentUser.id && stored.items.length > 0) {
+      setCart(stored.items);
     }
 
     setLoadingApp(true);
@@ -173,10 +179,13 @@ export function AppProvider({ children }) {
     // No escribir mientras la sesion aun se hidrata: sobreescribiria el userId
     // dueno con null y romperia el chequeo de "carrito de otra cuenta".
     if (authLoading) return;
+    // Sin sesion no tocamos el borrador guardado: debe sobrevivir al logout
+    // para poder recuperarlo al volver a entrar con la misma cuenta.
+    if (!currentUser) return;
     try {
       localStorage.setItem(
         CART_STORAGE_KEY,
-        JSON.stringify({ userId: currentUser?.id ?? null, items: cart }),
+        JSON.stringify({ userId: currentUser.id, items: cart }),
       );
     } catch {
       /* almacenamiento no disponible: el carrito sigue en memoria */

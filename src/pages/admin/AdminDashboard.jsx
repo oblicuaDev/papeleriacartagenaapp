@@ -304,7 +304,7 @@ export default function AdminDashboard() {
             <Tooltip content={<CustomTooltip />} />
             <Legend wrapperStyle={{ fontSize: 12, fontFamily: 'Montserrat' }} />
             <Area type="monotone" name="Subtotal" dataKey="subtotal" stroke={SERIES_COLORS.subtotal} strokeWidth={2} fill="url(#colorSubtotal)" dot={false} activeDot={{ r: 5 }} />
-            <Area type="monotone" name="IVA (19%)" dataKey="iva" stroke={SERIES_COLORS.iva} strokeWidth={2} fill="url(#colorIva)" dot={false} activeDot={{ r: 5 }} />
+            <Area type="monotone" name="IVA" dataKey="iva" stroke={SERIES_COLORS.iva} strokeWidth={2} fill="url(#colorIva)" dot={false} activeDot={{ r: 5 }} />
             <Area type="monotone" name="Total" dataKey="total" stroke={SERIES_COLORS.total} strokeWidth={2.5} fill="url(#colorTotal)" dot={false} activeDot={{ r: 6 }} />
           </AreaChart>
         </ResponsiveContainer>

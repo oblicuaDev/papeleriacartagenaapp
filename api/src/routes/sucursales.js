@@ -37,9 +37,14 @@ async function assertPriceListOrNull(priceListId) {
 router.get('/', requireAdminOrSupervisor, async (req, res) => {
   if (!canAccessCompany(req, res)) return;
   const companyId = parseInt(req.params.companyId);
+  // El supervisor solo ve su propia sede, no el resto de sucursales de la empresa.
+  const { role, clientRole, sucursalId } = req.user;
+  const isSupervisor = role === 'client' && clientRole === 'supervisor';
   try {
+    const params = [companyId];
+    const sucursalFilter = isSupervisor ? ` AND id = $${params.push(sucursalId ?? null)}` : '';
     const { rows } = await pool.query(
-      `SELECT * FROM sucursales WHERE company_id = $1 ORDER BY name`, [companyId]
+      `SELECT * FROM sucursales WHERE company_id = $1${sucursalFilter} ORDER BY name`, params
     );
     return res.json(rows);
   } catch (err) {

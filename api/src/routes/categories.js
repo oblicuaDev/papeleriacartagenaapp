@@ -119,30 +119,66 @@ router.put('/:id/related', requireRole('admin'), async (req, res) => {
 });
 
 // DELETE /categories/:id — hard delete con validacion
+//
+// products.category_id es NOT NULL + ON DELETE RESTRICT, asi que la subcategoria
+// no puede borrarse mientras CUALQUIER producto (activo o inactivo) la referencie.
+// El catalogo (AppContext, AdminProducts) solo trabaja con productos activos, por
+// lo que un admin puede ver "0 productos" en una subcategoria que en realidad
+// tiene productos inactivos/descontinuados aun vinculados -> el borrado fallaba
+// aunque "no tuviera productos registrados" desde su punto de vista.
+// Regla: los productos ACTIVOS siempre bloquean el borrado. Los INACTIVOS solo
+// bloquean si ya tienen historial de pedidos (order_items.product_id es RESTRICT,
+// no se puede perder ese historial); si no tienen historial son huerfanos y se
+// eliminan junto con la subcategoria.
 router.delete('/:id', requireRole('admin'), async (req, res) => {
   const id = parseInt(req.params.id);
+  const client = await pool.connect();
   try {
-    // products.category_id es ON DELETE RESTRICT
-    const { rows } = await pool.query(
-      `SELECT id FROM products WHERE category_id = $1 LIMIT 1`, [id]
+    await client.query('BEGIN');
+
+    const { rows: active } = await client.query(
+      `SELECT id FROM products WHERE category_id = $1 AND active = true LIMIT 1`, [id]
     );
-    if (rows.length) {
+    if (active.length) {
+      await client.query('ROLLBACK');
       return res.status(409).json({
-        error: 'La subcategoría tiene productos asociados. Reasigna o elimina los productos antes.',
+        error: 'La subcategoría tiene productos activos asociados. Reasigna o elimina los productos antes.',
       });
     }
 
-    const result = await pool.query(`DELETE FROM categories WHERE id = $1`, [id]);
+    const { rows: inactiveWithHistory } = await client.query(
+      `SELECT DISTINCT p.id
+       FROM products p
+       JOIN order_items oi ON oi.product_id = p.id
+       WHERE p.category_id = $1 AND p.active = false
+       LIMIT 1`, [id]
+    );
+    if (inactiveWithHistory.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'La subcategoría tiene productos inactivos con historial de pedidos. Reasígnalos a otra subcategoría antes de eliminar.',
+      });
+    }
+
+    // Productos inactivos sin historial: huerfanos, se eliminan junto con la subcategoria.
+    await client.query(`DELETE FROM products WHERE category_id = $1 AND active = false`, [id]);
+
+    const result = await client.query(`DELETE FROM categories WHERE id = $1`, [id]);
     if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Subcategoría no encontrada' });
     }
+    await client.query('COMMIT');
     return res.json({ message: 'Subcategoría eliminada definitivamente' });
   } catch (err) {
+    await client.query('ROLLBACK');
     if (err.code === '23503') {
       return res.status(409).json({ error: 'La subcategoría tiene productos vinculados' });
     }
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    client.release();
   }
 });
 

@@ -23,21 +23,29 @@ router.get('/', (req, res, next) => {
   if (role === 'client' && (clientRole === 'supervisor' || clientRole === 'admin_empresa' || clientRole === 'administrador_contrato')) return next();
   return res.status(403).json({ error: 'No autorizado' });
 }, async (req, res) => {
-  const { role: myRole, companyId: myCompanyId } = req.user;
+  const { role: myRole, companyId: myCompanyId, clientRole: myClientRole, sucursalId: mySucursalId } = req.user;
   const { role, companyId, sucursalId, active, search } = req.query;
 
   const params = [];
   const conditions = [];
 
-  // Supervisor/admin_empresa solo ve su empresa
+  // admin_empresa/administrador_contrato ven toda su empresa; supervisor
+  // solo su propia sucursal (usuarios bajo su responsabilidad).
   if (myRole === 'client') {
     conditions.push(`u.company_id = $${params.push(myCompanyId)}`);
+    if (myClientRole === 'supervisor') {
+      conditions.push(`u.sucursal_id = $${params.push(mySucursalId ?? null)}`);
+    }
   } else if (companyId) {
     conditions.push(`u.company_id = $${params.push(parseInt(companyId))}`);
   }
 
-  if (role)       conditions.push(`u.role = $${params.push(role)}`);
-  if (sucursalId) conditions.push(`u.sucursal_id = $${params.push(parseInt(sucursalId))}`);
+  if (role) conditions.push(`u.role = $${params.push(role)}`);
+  // El supervisor ya queda acotado a su sucursal arriba; ignorar cualquier
+  // intento de override via query para no permitirle salirse de su sede.
+  if (sucursalId && myClientRole !== 'supervisor') {
+    conditions.push(`u.sucursal_id = $${params.push(parseInt(sucursalId))}`);
+  }
   if (active !== undefined) conditions.push(`u.active = $${params.push(active === 'true')}`);
   if (search) {
     conditions.push(
@@ -59,7 +67,7 @@ router.get('/', (req, res, next) => {
 
 // GET /users/:id
 router.get('/:id', async (req, res) => {
-  const { role, companyId, id: myId } = req.user;
+  const { role, companyId, sucursalId: mySucursalId, clientRole: myClientRole, id: myId } = req.user;
   const targetId = parseInt(req.params.id);
 
   try {
@@ -69,11 +77,13 @@ router.get('/:id', async (req, res) => {
     const user = rows[0];
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    // Solo puede ver si es admin, su propia cuenta, o supervisor/administrador_contrato de la misma empresa
+    // Solo puede ver si es admin, su propia cuenta, administrador_contrato de la
+    // misma empresa, o supervisor de la misma empresa Y sucursal (usuarios bajo su responsabilidad).
     const isSelf = myId === targetId;
     const isCompanyManagerSameCompany = role === 'client' &&
-      (req.user.clientRole === 'supervisor' || req.user.clientRole === 'administrador_contrato') &&
-      user.company_id === companyId;
+      user.company_id === companyId &&
+      (myClientRole === 'administrador_contrato' ||
+        (myClientRole === 'supervisor' && user.sucursal_id === mySucursalId));
     if (role !== 'admin' && !isSelf && !isCompanyManagerSameCompany) {
       return res.status(403).json({ error: 'No autorizado' });
     }
@@ -88,7 +98,7 @@ router.get('/:id', async (req, res) => {
 // Para clients la lista de precios NO se solicita: se hereda automaticamente
 // de sucursal > company en el momento del pedido (resolveOrderRouting).
 router.post('/', requireAdminOrSupervisor, async (req, res) => {
-  const { role: myRole, companyId: myCompanyId } = req.user;
+  const { role: myRole, companyId: myCompanyId, clientRole: myClientRole, sucursalId: mySucursalId } = req.user;
   const {
     name, email, password, role, clientRole,
     companyId, sucursalId, branchId,
@@ -108,6 +118,15 @@ router.post('/', requireAdminOrSupervisor, async (req, res) => {
     if (role !== 'client') return res.status(403).json({ error: 'No autorizado para crear este tipo de usuario' });
     if (companyId && parseInt(companyId) !== myCompanyId) {
       return res.status(403).json({ error: 'Solo puede crear usuarios de su empresa' });
+    }
+    // El supervisor solo gestiona creadores de pedidos de su propia sucursal.
+    if (myClientRole === 'supervisor') {
+      if (clientRole && clientRole !== 'creador_pedidos') {
+        return res.status(403).json({ error: 'El supervisor solo puede crear usuarios Creador de pedidos' });
+      }
+      if (sucursalId && parseInt(sucursalId) !== mySucursalId) {
+        return res.status(403).json({ error: 'Solo puede crear usuarios de su propia sucursal' });
+      }
     }
   }
 
@@ -131,7 +150,7 @@ router.post('/', requireAdminOrSupervisor, async (req, res) => {
         role,
         role === 'client' ? clientRole || null : null,
         role === 'client' ? (companyId || myCompanyId) : null,
-        role === 'client' ? sucursalId || null : null,
+        role === 'client' ? (myClientRole === 'supervisor' ? mySucursalId : (sucursalId || null)) : null,
         // price_list_id siempre null en alta — se hereda en runtime via resolveOrderRouting
         null,
         (role === 'advisor' || role === 'delivery') ? branchId || null : null,
@@ -154,7 +173,7 @@ router.post('/', requireAdminOrSupervisor, async (req, res) => {
 
 // PUT /users/:id
 router.put('/:id', async (req, res) => {
-  const { role: myRole, companyId: myCompanyId, id: myId } = req.user;
+  const { role: myRole, companyId: myCompanyId, clientRole: myClientRole, sucursalId: mySucursalId, id: myId } = req.user;
   const targetId = parseInt(req.params.id);
 
   // Verificar permisos
@@ -162,10 +181,11 @@ router.put('/:id', async (req, res) => {
   const target = targetRows[0];
   if (!target) return res.status(404).json({ error: 'Usuario no encontrado' });
 
+  const isSupervisor = myClientRole === 'supervisor';
   const isSelf = myId === targetId;
   const isCompanyManagerSameCompany = myRole === 'client' &&
-    (req.user.clientRole === 'supervisor' || req.user.clientRole === 'administrador_contrato') &&
-    target.company_id === myCompanyId;
+    target.company_id === myCompanyId &&
+    (myClientRole === 'administrador_contrato' || (isSupervisor && target.sucursal_id === mySucursalId));
   if (myRole !== 'admin' && !isSelf && !isCompanyManagerSameCompany) {
     return res.status(403).json({ error: 'No autorizado' });
   }
@@ -175,6 +195,17 @@ router.put('/:id', async (req, res) => {
     priceListId, branchId, contactName, phone, address, active,
     allOrdersAccess,
   } = req.body;
+
+  // El supervisor no puede sacar al usuario de su sucursal ni cambiarle el rol
+  // a algo distinto de creador_pedidos (solo gestiona creadores de su sede).
+  if (isSupervisor && !isSelf) {
+    if (clientRole !== undefined && clientRole !== 'creador_pedidos') {
+      return res.status(403).json({ error: 'El supervisor solo puede gestionar usuarios Creador de pedidos' });
+    }
+    if (sucursalId !== undefined && parseInt(sucursalId) !== mySucursalId) {
+      return res.status(403).json({ error: 'No puede asignar el usuario a otra sucursal' });
+    }
+  }
 
   try {
     const fields = [];
@@ -212,7 +243,7 @@ router.put('/:id', async (req, res) => {
 
 // DELETE /users/:id — hard delete con validacion de dependencias
 router.delete('/:id', requireAdminOrSupervisor, async (req, res) => {
-  const { id: myId, companyId: myCompanyId, role: myRole } = req.user;
+  const { id: myId, companyId: myCompanyId, role: myRole, clientRole: myClientRole, sucursalId: mySucursalId } = req.user;
   const targetId = parseInt(req.params.id);
 
   if (myId === targetId) return res.status(409).json({ error: 'No se puede eliminar el propio usuario' });
@@ -228,9 +259,16 @@ router.delete('/:id', requireAdminOrSupervisor, async (req, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    if (myRole === 'client' && target.company_id !== myCompanyId) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'No autorizado' });
+    if (myRole === 'client') {
+      if (target.company_id !== myCompanyId) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'No autorizado' });
+      }
+      // El supervisor solo elimina usuarios de su propia sucursal.
+      if (myClientRole === 'supervisor' && target.sucursal_id !== mySucursalId) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'No autorizado' });
+      }
     }
 
     // Dependencias bloqueantes (orders.client_id tiene ON DELETE RESTRICT)

@@ -44,7 +44,7 @@ function requireCompanyReader(req, res, next) {
 router.get('/', requireCompanyReader, async (req, res) => {
   try {
     const { active, search } = req.query;
-    const { role, companyId, id: userId } = req.user;
+    const { role, clientRole, companyId, sucursalId, id: userId } = req.user;
     const params = [];
     const conditions = [];
 
@@ -68,11 +68,18 @@ router.get('/', requireCompanyReader, async (req, res) => {
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
 
+    // El supervisor solo debe ver su propia sede, no el resto de sucursales
+    // de la empresa (a diferencia de admin_empresa/administrador_contrato).
+    const isSupervisor = role === 'client' && clientRole === 'supervisor';
+    const sucursalFilter = isSupervisor
+      ? `AND s.id = $${params.push(sucursalId ?? null)}`
+      : '';
+
     const { rows } = await pool.query(
       `SELECT c.*,
         COALESCE(json_agg(s ORDER BY s.name) FILTER (WHERE s.id IS NOT NULL), '[]') AS sucursales
        FROM companies c
-       LEFT JOIN sucursales s ON s.company_id = c.id AND s.active = true
+       LEFT JOIN sucursales s ON s.company_id = c.id AND s.active = true ${sucursalFilter}
        ${where}
        GROUP BY c.id
        ORDER BY c.name`,
@@ -129,20 +136,25 @@ router.post('/', requireRole('admin'), async (req, res) => {
 
 // GET /companies/:id
 router.get('/:id', requireAdminOrSupervisor, async (req, res) => {
-  const { role, companyId } = req.user;
+  const { role, clientRole, companyId, sucursalId } = req.user;
   const id = parseInt(req.params.id);
   if (role === 'client' && companyId !== id) {
     return res.status(403).json({ error: 'No autorizado' });
   }
   try {
+    // El supervisor solo ve su propia sede, no el resto de sucursales de la empresa.
+    const isSupervisor = role === 'client' && clientRole === 'supervisor';
+    const params = [id];
+    const sucursalFilter = isSupervisor ? `AND s.id = $${params.push(sucursalId ?? null)}` : '';
+
     const { rows } = await pool.query(
       `SELECT c.*,
         COALESCE(json_agg(s ORDER BY s.name) FILTER (WHERE s.id IS NOT NULL), '[]') AS sucursales
        FROM companies c
-       LEFT JOIN sucursales s ON s.company_id = c.id
+       LEFT JOIN sucursales s ON s.company_id = c.id ${sucursalFilter}
        WHERE c.id = $1
        GROUP BY c.id`,
-      [id]
+      params
     );
     if (!rows[0]) return res.status(404).json({ error: 'Empresa no encontrada' });
     return res.json(rows[0]);

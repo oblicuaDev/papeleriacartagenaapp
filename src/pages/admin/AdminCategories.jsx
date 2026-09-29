@@ -204,7 +204,10 @@ export default function AdminCategories() {
       alert(`La subcategoría "${cat.name}" tiene ${count} producto(s) asociado(s). Reasígnalos antes de eliminar.`);
       return;
     }
-    const ok = window.confirm(`¿Eliminar definitivamente la subcategoría "${cat.name}"? Esta acción no se puede deshacer.`);
+    const ok = window.confirm(
+      `¿Eliminar definitivamente la subcategoría "${cat.name}"? Esta acción no se puede deshacer.\n\n` +
+      `Si tiene productos inactivos sin historial de pedidos, también se eliminarán junto con la subcategoría.`
+    );
     if (!ok) return;
     try {
       await categoriesApi.remove(cat.id);

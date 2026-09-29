@@ -12,9 +12,13 @@ const IN_DELIVERY_STATUSES = ['Alistamiento', 'En Ruta'];
 // Tabs visibles para creador_pedidos / supervisor / admin_empresa.
 // 'Aprobados' incluye 'Validar disponibilidad' (flujo nuevo) y 'Pendiente' (legacy).
 // El listado general solo muestra pedidos ya aprobados formalmente. Los que
-// están "Pendiente por aprobar" se ven únicamente en "Aprobar pedidos".
+// están "Pendiente por aprobar" se ven únicamente en "Aprobar pedidos" (supervisor/
+// admin_contrato) o en la pestaña "Pendientes por aprobar" (solo creador_pedidos,
+// que no tiene acceso a "Aprobar pedidos" y necesita ver que su pedido ya quedó
+// registrado para no duplicarlo).
 const ORDER_TABS = [
   { value: 'all',         label: 'Todos' },
+  { value: 'pending',     label: 'Pendientes por aprobar', statuses: ['Pendiente por aprobar'], creatorOnly: true },
   { value: 'approved',    label: 'Aprobados',  statuses: ['Validar disponibilidad', 'Pendiente'] },
   { value: 'in_delivery', label: 'En entrega', statuses: IN_DELIVERY_STATUSES },
   { value: 'delivered',   label: 'Entregados', statuses: ['Entregado'] },
@@ -22,6 +26,7 @@ const ORDER_TABS = [
 ];
 
 // Estados excluidos del listado general (solo visibles en "Aprobar pedidos").
+// El creador_pedidos es la excepcion: para el, nunca se ocultan (ver arriba).
 const HIDDEN_STATUSES = ['Pendiente por aprobar'];
 
 const ALL_STATUSES = [
@@ -105,9 +110,16 @@ export default function ClientOrders() {
   const myOrders = useMemo(() => {
     return [...orders]
       .filter(o => visibleClientIds.includes(o.clientId))
-      .filter(o => !HIDDEN_STATUSES.includes(o.status))
+      // El creador_pedidos si ve sus "Pendiente por aprobar": es la unica forma
+      // que tiene de saber que su pedido ya quedo registrado y evitar duplicarlo.
+      .filter(o => isCreador || !HIDDEN_STATUSES.includes(o.status))
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  }, [orders, visibleClientIds]);
+  }, [orders, visibleClientIds, isCreador]);
+
+  const visibleTabs = useMemo(
+    () => ORDER_TABS.filter(t => !t.creatorOnly || isCreador),
+    [isCreador]
+  );
 
   function tabMatches(order) {
     if (tab === 'all') return true;
@@ -246,7 +258,7 @@ export default function ClientOrders() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit overflow-x-auto">
-        {ORDER_TABS.map(t => (
+        {visibleTabs.map(t => (
           <button
             key={t.value}
             onClick={() => setTab(t.value)}

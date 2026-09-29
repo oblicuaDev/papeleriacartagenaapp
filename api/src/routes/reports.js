@@ -187,6 +187,34 @@ const DATASETS = {
 const DEFAULT_LIMIT = 1000;
 const MAX_LIMIT = 50000;
 
+// El catalogo se maneja con listas de precio dinamicas (Tarifa 1..N + listas
+// por empresa). No podemos declararlas en `DATASETS` porque son datos, asi que
+// para el dataset `products` inyectamos una columna por lista en tiempo de
+// request: cada una trae el override de price_list_items o vacio si el producto
+// cae al precio base. Se insertan justo despues de "Precio base".
+async function withPriceListColumns(ds) {
+  const { rows } = await pool.query('SELECT id, name FROM price_lists ORDER BY id');
+  if (rows.length === 0) return ds;
+
+  const plCols = {};
+  for (const pl of rows) {
+    // pl.id es un entero de la BD: seguro para interpolar.
+    plCols[`price_list_${pl.id}`] = {
+      header: pl.name,
+      sql: `(SELECT pli.price FROM price_list_items pli
+             WHERE pli.product_id = p.id AND pli.price_list_id = ${pl.id})::float`,
+      numFmt: MONEY,
+    };
+  }
+
+  const columns = {};
+  for (const [key, col] of Object.entries(ds.columns)) {
+    columns[key] = col;
+    if (key === 'price') Object.assign(columns, plCols);
+  }
+  return { ...ds, columns };
+}
+
 // Construye { where, params, columns[] } comun a count y export.
 // `forceCompanyId` (o null) acota el dataset a una empresa.
 function buildQuery(ds, query, forceCompanyId) {
@@ -231,8 +259,9 @@ function buildQuery(ds, query, forceCompanyId) {
 //   ?count=1                       -> { count: N }
 //   ?format=xlsx|csv&columns=a,b   -> archivo
 router.get('/:dataset', async (req, res) => {
-  const ds = DATASETS[req.params.dataset];
+  let ds = DATASETS[req.params.dataset];
   if (!ds) return res.status(422).json({ error: 'dataset desconocido' });
+  if (req.params.dataset === 'products') ds = await withPriceListColumns(ds);
 
   const scopeId = scopeCompanyId(req);
   if (scopeId != null && !SCOPED_DATASETS.includes(req.params.dataset)) {
@@ -295,11 +324,12 @@ router.get('/:dataset', async (req, res) => {
 });
 
 // GET /reports  -> metadata para que el frontend arme el formulario
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const scoped = scopeCompanyId(req) != null;
-  const entries = Object.entries(DATASETS)
+  const entries = await Promise.all(Object.entries(DATASETS)
     .filter(([key]) => !scoped || SCOPED_DATASETS.includes(key))
-    .map(([key, ds]) => {
+    .map(async ([key, dsRaw]) => {
+      const ds = key === 'products' ? await withPriceListColumns(dsRaw) : dsRaw;
       const hidden = scoped ? new Set(ds.scopedHiddenCols || []) : new Set();
       return [
         key,
@@ -314,7 +344,7 @@ router.get('/', (req, res) => {
           ),
         },
       ];
-    });
+    }));
   res.json(Object.fromEntries(entries));
 });
 

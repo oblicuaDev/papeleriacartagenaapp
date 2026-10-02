@@ -159,7 +159,7 @@ export function statusLabel(status) {
 }
 
 export const STATUS_STYLES = {
-  'Pendiente por aprobar': { bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-200' },
+  'Pendiente por aprobar': { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-200' },
   'Pendiente': { bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-200' },
   'Rechazado': { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-200' },
   'Validar disponibilidad': { bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-200' },

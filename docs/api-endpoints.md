@@ -444,3 +444,22 @@ Estadísticas del cliente autenticado: gasto por categoría, histórico de pedid
 |---------|---------------------------------|
 | `year`  | Año a consultar (default: actual)|
 | `month` | Mes a consultar (opcional)       |
+
+---
+
+## Reclamos (`/claims`)
+
+Roles: `client` (excepto `admin_empresa` para crear), `admin`, `advisor`. `delivery` no tiene acceso.
+Alcance igual al de pedidos (creador: los suyos; supervisor: su sucursal; admin_contrato/admin_empresa: su empresa; asesor: los asignados o todos con `allOrdersAccess`).
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/claims?status=Abierto\|Cerrado&orderId=&search=` | Listado según alcance del rol |
+| GET | `/claims/:id` | Detalle: descripción (HTML saneado), adjuntos, trazabilidad, `attachments_days_left` |
+| POST | `/claims` | Crea el reclamo (multipart: `orderId`, `reason`, `description`, `files[]` ≤5, `confirmDuplicate`). 409 `OPEN_CLAIM_EXISTS` si el pedido ya tiene un reclamo abierto y no se envía `confirmDuplicate=true` |
+| POST | `/claims/:id/notes` | (admin/asesor) Nota pública al cliente, no cierra |
+| POST | `/claims/:id/close` | (admin/asesor) Cierre: `note` obligatoria + `file` opcional (permanente) |
+| POST | `/claims/:id/return` | (admin/asesor) Devolución: `{ note, confirm: true }` → pedido a `Devuelto` |
+
+Motivos: `no_llego_producto`, `producto_averiado`, `devolucion_producto`, `reclamo_servicio`, `felicitacion_servicio`.
+Reglas: reclamo ≠ felicitación → pedido a `En reclamación`; felicitación → nace `Cerrado` sin tocar el pedido. Al cerrar el último reclamo abierto, el pedido vuelve a su estado previo (salvo `Devuelto`). `Devuelto` queda fuera de consolidados y presupuesto del contrato. Adjuntos iniciales se purgan a los 60 días (`lib/claimsPurge.js`, cada 6 h); el de cierre no.

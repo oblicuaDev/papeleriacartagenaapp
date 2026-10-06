@@ -39,6 +39,7 @@ import {
   ArrowRight,
   FileBadge,
 } from "lucide-react";
+import OrderClaimsPanel from "./OrderClaimsPanel";
 import { STATUS_STYLES, ORDER_STATUSES, formatCOP, statusLabel, aggregateOrderIva, ivaRateLabel } from "../data/mockData";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -431,7 +432,9 @@ export default function OrderDetailCRM({
   // El asesor NO cambia estados manualmente: flujo automatico (aprobado → asignado)
   // y repartidor maneja el resto.
   const isAdvisor = currentUser?.role === "advisor";
-  const canEditStatus = editable && !isAdvisor;
+  // En reclamación / Devuelto: el estado lo gobierna el módulo de reclamos.
+  const claimLocked = ["En reclamación", "Devuelto"].includes(order.status);
+  const canEditStatus = editable && !isAdvisor && !claimLocked;
   // Pedido entregado: bloquear asignaciones y cambios logisticos para todos los roles.
   const isDelivered = order.status === "Entregado";
   const [status, setStatus] = useState(order.status);
@@ -461,7 +464,7 @@ export default function OrderDetailCRM({
         { value: "receipt", label: "Recibo" },
       ];
 
-  const { products } = useApp();
+  const { products, refreshOrders } = useApp();
   const advisors  = users.filter((u) => u.role === "advisor"  && u.active);
   const deliverers = users.filter((u) => u.role === "delivery" && u.active);
 
@@ -500,6 +503,19 @@ export default function OrderDetailCRM({
 
   const style = STATUS_STYLES[status] || [];
   const comments = localComments;
+
+  // Un reclamo pudo cambiar el estado del pedido (En reclamación / Devuelto /
+  // restauración al cerrar) y agregó comentarios de trazabilidad.
+  async function handleClaimsChanged() {
+    try {
+      const fresh = await ordersApi.get(order.id);
+      order.status = fresh.status;
+      setStatus(fresh.status);
+      if (Array.isArray(fresh?.comments)) setLocalComments(fresh.comments);
+      setTimelineRefreshKey((k) => k + 1);
+      refreshOrders?.();
+    } catch { /* noop */ }
+  }
   const attachments = localAttachments;
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -999,6 +1015,15 @@ export default function OrderDetailCRM({
               </p>
               <p className="text-sm text-amber-900">{order.notes}</p>
             </div>
+          )}
+
+          {/* Reclamos del pedido (gestión: admin / asesor) */}
+          {(currentUser?.role === "admin" || currentUser?.role === "advisor") && (
+            <OrderClaimsPanel
+              order={order}
+              canManage
+              onOrderChanged={handleClaimsChanged}
+            />
           )}
 
           {/* ── Timeline section (PHASE 6) ────────────────────────────── */}

@@ -1,6 +1,6 @@
 import logo from "../../logo-cartagena.jpg";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LogOut, ClipboardList, Building } from "lucide-react";
+import { LogOut, ClipboardList, Building, ShieldAlert } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useApp } from "../../context/AppContext";
 import CreditsFooter from "../../components/CreditsFooter";
@@ -66,6 +66,19 @@ export default function AdvisorLayout() {
             >
               <Building className="w-4 h-4" />
               Empresas
+            </NavLink>
+            <NavLink
+              to="/asesor/reclamos"
+              className={({ isActive }) =>
+                `flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                  isActive
+                    ? "bg-white bg-opacity-20 text-white"
+                    : "text-blue-200 hover:text-white hover:bg-white hover:bg-opacity-10"
+                }`
+              }
+            >
+              <ShieldAlert className="w-4 h-4" />
+              Reclamos
             </NavLink>
           </nav>
 

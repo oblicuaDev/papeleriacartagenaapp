@@ -57,7 +57,7 @@ export default function AdminOrders() {
     return users.find((u) => u.id === id)?.name || "—";
   }
 
-  const allStatuses = ["Pendiente por aprobar", ...ORDER_STATUSES];
+  const allStatuses = ["Pendiente por aprobar", ...ORDER_STATUSES, "En reclamación", "Devuelto"];
 
   const filtered = orders
     .filter((o) => (filterStatus ? o.status === filterStatus : true))

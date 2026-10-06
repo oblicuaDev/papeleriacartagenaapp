@@ -20,6 +20,7 @@ import catalogRouter     from './routes/catalog.js';
 import statsRouter       from './routes/stats.js';
 import contractsRouter   from './routes/contracts.js';
 import reportsRouter     from './routes/reports.js';
+import claimsRouter      from './routes/claims.js';
 import { requireAuth }   from './middleware/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,6 +67,7 @@ api.use('/catalog',                    catalogRouter);
 api.use('/stats',                      statsRouter);
 api.use('/contracts',                  contractsRouter);
 api.use('/reports',                    reportsRouter);
+api.use('/claims',                     claimsRouter);
 
 app.use('/api/v1', api);
 

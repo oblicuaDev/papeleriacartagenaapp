@@ -17,6 +17,7 @@ import AdminOrderDetail from './pages/admin/AdminOrderDetail';
 import AdminCompanies from './pages/admin/AdminCompanies';
 import AdminContracts from './pages/admin/AdminContracts';
 import AdminReports from './pages/admin/AdminReports';
+import AdminClaims from './pages/admin/AdminClaims';
 import ClientLayout from './pages/client/ClientLayout';
 import ClientCatalog from './pages/client/ClientCatalog';
 import ClientOrders from './pages/client/ClientOrders';
@@ -26,10 +27,12 @@ import ClientOrderDetail from './pages/client/ClientOrderDetail';
 import ClientManage from './pages/client/ClientManage';
 import ClientStats from './pages/client/ClientStats';
 import ClientReports from './pages/client/ClientReports';
+import ClientClaims from './pages/client/ClientClaims';
 import AdvisorLayout from './pages/advisor/AdvisorLayout';
 import AdvisorOrders from './pages/advisor/AdvisorOrders';
 import AdvisorOrderDetail from './pages/advisor/AdvisorOrderDetail';
 import AdvisorCompanies from './pages/advisor/AdvisorCompanies';
+import AdvisorClaims from './pages/advisor/AdvisorClaims';
 import DeliveryLayout from './pages/delivery/DeliveryLayout';
 import DeliveryOrders from './pages/delivery/DeliveryOrders';
 import DeliveryOrderDetail from './pages/delivery/DeliveryOrderDetail';
@@ -61,6 +64,7 @@ export default function App() {
             <Route path="sedes" element={<AdminBranches />} />
             <Route path="asesores" element={<AdminUsers />} />
             <Route path="reportes" element={<AdminReports />} />
+            <Route path="reclamos" element={<AdminClaims />} />
           </Route>
           <Route
             path="/cliente"
@@ -77,6 +81,7 @@ export default function App() {
             <Route path="pedidos/:orderId" element={<ClientOrderDetail />} />
             <Route path="estadisticas" element={<ClientStats />} />
             <Route path="reportes" element={<ClientReports />} />
+            <Route path="reclamos" element={<ClientClaims />} />
             <Route path="administrar" element={<ClientManage />} />
           </Route>
           <Route
@@ -89,6 +94,7 @@ export default function App() {
           >
             <Route index element={<AdvisorOrders />} />
             <Route path="empresas" element={<AdvisorCompanies />} />
+            <Route path="reclamos" element={<AdvisorClaims />} />
             <Route path="pedido/:orderId" element={<AdvisorOrderDetail />} />
           </Route>
           <Route

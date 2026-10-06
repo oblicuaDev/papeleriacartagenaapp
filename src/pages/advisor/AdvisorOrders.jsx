@@ -52,6 +52,7 @@ const FILTER_TABS = [
   { label: 'Por validar', value: 'Validar disponibilidad' },
   { label: 'En proceso', value: 'process' },
   { label: 'Entregado', value: 'Entregado' },
+  { label: 'En reclamación', value: 'En reclamación' },
 ];
 
 // 'Validar disponibilidad' ahora es responsabilidad del asesor (lo manejamos

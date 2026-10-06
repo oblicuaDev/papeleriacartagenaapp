@@ -23,6 +23,7 @@ const ORDER_TABS = [
   { value: 'in_delivery', label: 'En entrega', statuses: IN_DELIVERY_STATUSES },
   { value: 'delivered',   label: 'Entregados', statuses: ['Entregado'] },
   { value: 'rejected',    label: 'Rechazados', statuses: ['Rechazado'] },
+  { value: 'claims',      label: 'En reclamación', statuses: ['En reclamación', 'Devuelto'] },
 ];
 
 // Estados excluidos del listado general (solo visibles en "Aprobar pedidos").
@@ -36,6 +37,8 @@ const ALL_STATUSES = [
   'Alistamiento',
   'En Ruta',
   'Entregado',
+  'En reclamación',
+  'Devuelto',
 ];
 
 export default function ClientOrders() {

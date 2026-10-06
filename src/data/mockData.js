@@ -152,6 +152,8 @@ export const STATUS_LABELS = {
   'Alistamiento':          'Alistamiento',
   'En Ruta':               'En Ruta',
   'Entregado':             'Entregado',
+  'En reclamación':        'En reclamación',
+  'Devuelto':              'Devuelto',
 };
 
 export function statusLabel(status) {
@@ -166,6 +168,8 @@ export const STATUS_STYLES = {
   'Alistamiento': { bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-200' },
   'En Ruta': { bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-200' },
   'Entregado': { bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-200' },
+  'En reclamación': { bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-200' },
+  'Devuelto': { bg: 'bg-slate-200', text: 'text-slate-700', border: 'border-slate-300' },
 };
 
 // =====================

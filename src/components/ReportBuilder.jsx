@@ -41,6 +41,8 @@ const ORDER_STATUSES = [
   "Alistamiento",
   "En Ruta",
   "Entregado",
+  "En reclamación",
+  "Devuelto",
 ];
 const USER_ROLES = ["admin", "advisor", "client", "delivery"];
 

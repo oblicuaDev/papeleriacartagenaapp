@@ -187,6 +187,29 @@ export const ordersApi = {
   },
 };
 
+// ── Reclamos ────────────────────────────────────────────────
+export const claimsApi = {
+  list: (params = {}) => get('/claims?' + new URLSearchParams(params)),
+  get:  (id)          => get(`/claims/${id}`),
+  create: ({ orderId, reason, description, files = [], confirmDuplicate = false }) => {
+    const fd = new FormData();
+    fd.append('orderId', orderId);
+    fd.append('reason', reason);
+    fd.append('description', description);
+    if (confirmDuplicate) fd.append('confirmDuplicate', 'true');
+    files.forEach((f) => fd.append('files', f));
+    return postForm('/claims', fd);
+  },
+  addNote: (id, text) => post(`/claims/${id}/notes`, { text }),
+  close: (id, note, file) => {
+    const fd = new FormData();
+    fd.append('note', note);
+    if (file) fd.append('file', file);
+    return postForm(`/claims/${id}/close`, fd);
+  },
+  returnOrder: (id, note) => post(`/claims/${id}/return`, { note, confirm: true }),
+};
+
 // ── Contratos ───────────────────────────────────────────────
 export const contractsApi = {
   list:   ()         => get('/contracts'),

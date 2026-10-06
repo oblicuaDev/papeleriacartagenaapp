@@ -9,11 +9,15 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import QuantityInput from '../../components/QuantityInput';
 import { RejectModal, ConfirmApproveModal } from '../../components/OrderApprovalModals';
+import OrderClaimsPanel from '../../components/OrderClaimsPanel';
 import { ordersApi } from '../../services/api';
 import { STATUS_STYLES, formatCOP, aggregateOrderIva, ivaRateLabel } from '../../data/mockData';
 
 // Un pedido solo se edita ANTES de su aprobación formal. Aprobado = cerrado.
 const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente'];
+
+// Estados sobre los que no se puede crear un reclamo.
+const CLAIM_BLOCKED_STATUSES = ['Pendiente por aprobar', 'Rechazado', 'Devuelto'];
 
 function fileIcon(type = '') {
   if (type.startsWith('image/')) return <ImageIcon className="w-4 h-4 text-blue-500" />;
@@ -47,7 +51,7 @@ function roleBadge(role) {
 export default function ClientOrderDetail() {
   const { orderId } = useParams();
   const navigate    = useNavigate();
-  const { users, updateOrder } = useApp();
+  const { users, updateOrder, refreshOrders } = useApp();
   const { currentUser } = useAuth();
 
   // El listado /orders no trae items/comments/attachments. Hacemos fetch del
@@ -128,6 +132,18 @@ export default function ClientOrderDetail() {
       .catch(() => setDecision(null));
     return () => { cancelled = true; };
   }, [order?.id, order?.status]);
+
+  // Reclamos: se pueden crear sobre pedidos ya aprobados (no devueltos). admin_empresa es solo lectura.
+  const canCreateClaim = order &&
+    currentUser?.clientRole !== 'admin_empresa' &&
+    !CLAIM_BLOCKED_STATUSES.includes(order.status);
+
+  async function handleClaimsChanged() {
+    try {
+      setOrder(await ordersApi.get(orderId));
+      refreshOrders?.();
+    } catch { /* noop */ }
+  }
 
   // admin_empresa es de solo lectura; el resto de roles cliente pueden
   // editar mientras el pedido no haya entrado a Alistamiento.
@@ -537,6 +553,13 @@ export default function ClientOrderDetail() {
               <p className="text-sm text-amber-900">{order.notes}</p>
             </div>
           )}
+
+          {/* Reclamos del pedido */}
+          <OrderClaimsPanel
+            order={order}
+            canCreate={canCreateClaim}
+            onOrderChanged={handleClaimsChanged}
+          />
 
           {/* Comments (read-only) */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

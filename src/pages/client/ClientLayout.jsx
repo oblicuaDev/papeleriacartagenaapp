@@ -1,7 +1,7 @@
 import logo from '../../logo-cartagena.jpg';
 import { useState } from 'react';
 import { NavLink, Link, Outlet, useNavigate } from 'react-router-dom';
-import { ShoppingCart, LogOut, X, Trash2, Search, ClipboardCheck, Users, BarChart3, HelpCircle, Save, FileSpreadsheet } from 'lucide-react';
+import { ShoppingCart, LogOut, X, Trash2, Search, ClipboardCheck, Users, BarChart3, HelpCircle, Save, FileSpreadsheet, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import QuantityInput from '../../components/QuantityInput';
@@ -99,6 +99,15 @@ export default function ClientLayout() {
               }
             >
               Pedidos
+            </NavLink>
+            <NavLink
+              to="/cliente/reclamos"
+              className={({ isActive }) =>
+                `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${isActive ? 'bg-white bg-opacity-20 text-white' : 'text-blue-200 hover:text-white hover:bg-white hover:bg-opacity-10'}`
+              }
+            >
+              <ShieldAlert className="w-4 h-4" />
+              Mis reclamos
             </NavLink>
             <NavLink
               to="/cliente/estadisticas"

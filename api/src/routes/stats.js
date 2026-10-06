@@ -118,7 +118,7 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
       pool.query(`
         SELECT status, COUNT(*) AS count
         FROM orders
-        WHERE status NOT IN ('Borrador', 'Pendiente por aprobar', 'Rechazado')
+        WHERE status NOT IN ('Borrador', 'Pendiente por aprobar', 'Rechazado', 'Devuelto')
         GROUP BY status`),
       pool.query(
         `SELECT TO_CHAR(DATE_TRUNC('month', o.created_at), 'YYYY-MM') AS month,
@@ -139,7 +139,7 @@ router.get('/admin', requireRole('admin'), async (req, res) => {
                 SUM(oi.quantity)::int AS quantity
          FROM orders o
          JOIN order_items oi ON oi.order_id = o.id
-         WHERE o.status NOT IN ('Pendiente por aprobar', 'Rechazado') ${rangeWhereAnd}
+         WHERE o.status NOT IN ('Pendiente por aprobar', 'Rechazado', 'Devuelto') ${rangeWhereAnd}
          GROUP BY oi.product_id, oi.product_name, oi.sku
          ORDER BY quantity DESC
          LIMIT 10`,
@@ -244,7 +244,7 @@ router.get('/advisor', requireRole('advisor'), async (req, res) => {
          FROM orders o
          JOIN users uc ON uc.id = o.client_id
          JOIN order_items oi ON oi.order_id = o.id
-         WHERE ${rangeWhere} AND o.status NOT IN ('Pendiente por aprobar', 'Rechazado')
+         WHERE ${rangeWhere} AND o.status NOT IN ('Pendiente por aprobar', 'Rechazado', 'Devuelto')
          GROUP BY oi.product_id, oi.product_name, oi.sku
          ORDER BY quantity DESC
          LIMIT 10`,
@@ -374,20 +374,20 @@ router.get('/client', requireRole('client'), async (req, res) => {
     ] = await Promise.all([
       pool.query(
         `SELECT COUNT(*) AS total,
-                COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS subtotal,
-                COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS iva,
-                COALESCE(SUM(o.iva_19) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS iva19,
-                COALESCE(SUM(o.iva_5) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS iva5,
-                COALESCE(SUM(o.iva_exento_base) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS exento_base,
-                COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS revenue
+                COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0) AS subtotal,
+                COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0) AS iva,
+                COALESCE(SUM(o.iva_19) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0) AS iva19,
+                COALESCE(SUM(o.iva_5) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0) AS iva5,
+                COALESCE(SUM(o.iva_exento_base) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0) AS exento_base,
+                COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0) AS revenue
          ${fromJoin} WHERE ${where}`,
         params
       ),
       pool.query(
         `SELECT COUNT(*) AS total,
-                COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS subtotal,
-                COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS iva,
-                COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0) AS revenue
+                COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0) AS subtotal,
+                COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0) AS iva,
+                COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0) AS revenue
          ${fromJoin}
          WHERE ${where}
            AND DATE_TRUNC('month', o.created_at) = DATE_TRUNC('month', NOW())`,
@@ -402,9 +402,9 @@ router.get('/client', requireRole('client'), async (req, res) => {
       pool.query(
         `SELECT TO_CHAR(DATE_TRUNC('month', o.created_at), 'YYYY-MM') AS month,
                 COUNT(*)::int AS orders,
-                COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS subtotal,
-                COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS iva,
-                COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS revenue
+                COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0)::float AS subtotal,
+                COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0)::float AS iva,
+                COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0)::float AS revenue
          ${fromJoin} WHERE ${where}
          GROUP BY 1
          ORDER BY 1 DESC
@@ -418,7 +418,7 @@ router.get('/client', requireRole('client'), async (req, res) => {
          ${fromJoin}
          JOIN order_items oi ON oi.order_id = o.id
          WHERE ${where}
-           AND o.status NOT IN ('Rechazado', 'Pendiente por aprobar')
+           AND o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')
          GROUP BY oi.product_id, oi.product_name, oi.sku
          ORDER BY quantity DESC
          LIMIT 10`,
@@ -429,9 +429,9 @@ router.get('/client', requireRole('client'), async (req, res) => {
         ? pool.query(
             `SELECT uc.id AS user_id, uc.name AS user_name,
                     COUNT(*)::int AS orders,
-                    COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS subtotal,
-                    COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS iva,
-                    COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar')), 0)::float AS revenue
+                    COALESCE(SUM(o.subtotal) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0)::float AS subtotal,
+                    COALESCE(SUM(o.iva) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0)::float AS iva,
+                    COALESCE(SUM(o.total) FILTER (WHERE o.status NOT IN ('Rechazado', 'Pendiente por aprobar', 'Devuelto')), 0)::float AS revenue
              ${fromJoin}
              WHERE ${where}
              GROUP BY uc.id, uc.name
@@ -459,7 +459,7 @@ router.get('/client', requireRole('client'), async (req, res) => {
            FROM orders o
            JOIN users uc ON uc.id = o.client_id
            WHERE uc.company_id = $1
-             AND o.status NOT IN ('Pendiente por aprobar', 'Rechazado', 'Borrador')
+             AND o.status NOT IN ('Pendiente por aprobar', 'Rechazado', 'Borrador', 'Devuelto')
              AND DATE_PART('year', o.created_at) = DATE_PART('year', NOW())`,
           [companyId]
         ),

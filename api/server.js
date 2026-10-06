@@ -1,6 +1,7 @@
 import "dotenv/config";
 import app from "./src/app.js";
 import pool from "./src/config/db.js";
+import { scheduleClaimAttachmentPurge } from "./src/lib/claimsPurge.js";
 
 const PORT = parseInt(process.env.PORT || "3000");
 
@@ -13,6 +14,8 @@ async function start() {
     console.error("✘ No se pudo conectar a PostgreSQL:", err.message);
     process.exit(1);
   }
+
+  scheduleClaimAttachmentPurge();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(

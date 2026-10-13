@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { Plus, X, Truck, UserCog, Pencil, Trash2 } from 'lucide-react';
+import { Plus, X, Truck, UserCog, Pencil, Trash2, UserX, UserCheck } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { usersApi } from '../../services/api';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -28,6 +30,10 @@ const ROLE_META = {
 
 export default function AdminUsers() {
   const { users, refreshUsers, branches } = useApp();
+  const { currentUser } = useAuth();
+  const [statusTarget, setStatusTarget] = useState(null); // usuario a activar/desactivar
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusError, setStatusError] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -82,7 +88,6 @@ export default function AdminUsers() {
           name:     form.name,
           email:    form.email,
           branchId: form.branchId ? Number(form.branchId) : null,
-          active:   form.active,
         };
         if (editingUser.role === 'advisor') payload.allOrdersAccess = form.allOrdersAccess;
         if (form.password) payload.password = form.password;
@@ -95,7 +100,7 @@ export default function AdminUsers() {
           role:     form.role,
           branchId: form.branchId ? Number(form.branchId) : null,
           initials,
-          active:   form.active,
+          active:   true,
           allOrdersAccess: form.role === 'advisor' ? form.allOrdersAccess : false,
         });
       }
@@ -105,6 +110,20 @@ export default function AdminUsers() {
       setError(err?.message || 'No se pudo guardar el usuario');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleToggleActive() {
+    setStatusBusy(true);
+    setStatusError(null);
+    try {
+      await usersApi.update(statusTarget.id, { active: !statusTarget.active });
+      await refreshUsers();
+      setStatusTarget(null);
+    } catch (err) {
+      setStatusError(err?.message || 'No se pudo actualizar el estado del usuario');
+    } finally {
+      setStatusBusy(false);
     }
   }
 
@@ -178,7 +197,7 @@ export default function AdminUsers() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredUsers.map(u => (
-                <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                <tr key={u.id} className={`hover:bg-gray-50 transition-colors ${u.active ? '' : 'opacity-60'}`}>
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
                       <div className={`w-9 h-9 ${tabMeta.pillCls} rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0`}>
@@ -212,6 +231,19 @@ export default function AdminUsers() {
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
+                      {u.id !== currentUser?.id && (
+                        <button
+                          onClick={() => { setStatusError(null); setStatusTarget(u); }}
+                          title={u.active ? 'Desactivar' : 'Reactivar'}
+                          className={`p-1.5 rounded-lg transition ${
+                            u.active
+                              ? 'text-gray-400 hover:text-amber-700 hover:bg-amber-50'
+                              : 'text-gray-400 hover:text-green-700 hover:bg-green-50'
+                          }`}
+                        >
+                          {u.active ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDelete(u)}
                         title="Eliminar"
@@ -234,6 +266,23 @@ export default function AdminUsers() {
           </table>
         </div>
       </div>
+
+      {statusTarget && (
+        <ConfirmDialog
+          title={statusTarget.active ? 'Desactivar usuario' : 'Reactivar usuario'}
+          tone={statusTarget.active ? 'danger' : 'primary'}
+          confirmLabel={statusTarget.active ? 'Sí, desactivar' : 'Sí, reactivar'}
+          message={statusTarget.active ? (
+            <>¿Desactivar a <strong>{statusTarget.name}</strong>? No podrá iniciar sesión ni usar el sistema. Su registro y su historial se conservan y puede reactivarse en cualquier momento.</>
+          ) : (
+            <>¿Reactivar a <strong>{statusTarget.name}</strong>? Podrá volver a iniciar sesión.</>
+          )}
+          busy={statusBusy}
+          error={statusError}
+          onConfirm={handleToggleActive}
+          onCancel={() => setStatusTarget(null)}
+        />
+      )}
 
       {showModal && (
         <Modal
@@ -280,17 +329,6 @@ export default function AdminUsers() {
               <label className={labelClass}>Iniciales (max 3)</label>
               <input className={inputClass} maxLength={3} value={form.initials} onChange={e => setForm(f => ({ ...f, initials: e.target.value.toUpperCase() }))} placeholder="AM" />
             </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="userActive"
-                checked={form.active}
-                onChange={e => setForm(f => ({ ...f, active: e.target.checked }))}
-                className="rounded"
-              />
-              <label htmlFor="userActive" className="text-sm text-gray-700">Usuario activo</label>
-            </div>
-
             {form.role === 'advisor' && (
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                 <div className="flex items-start gap-2">

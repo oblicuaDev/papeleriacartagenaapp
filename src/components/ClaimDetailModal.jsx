@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   X, AlertTriangle, Paperclip, FileText, ImageIcon, Download, MessageSquare,
-  CheckCircle2, Undo2, PlusCircle, ExternalLink, Send,
+  CheckCircle2, Undo2, PlusCircle, ExternalLink, Send, Package,
 } from "lucide-react";
 import { claimsApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
@@ -181,6 +181,36 @@ export default function ClaimDetailModal({ claimId, canManage = false, showOrder
                   dangerouslySetInnerHTML={{ __html: claim.description }}
                 />
               </div>
+
+              {claim.items?.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5" /> Artículos reclamados
+                  </p>
+                  <div className="border border-gray-100 rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-xs text-gray-500">
+                        <tr>
+                          <th className="text-left font-medium px-3 py-2">Artículo</th>
+                          <th className="text-left font-medium px-3 py-2">SKU</th>
+                          <th className="text-right font-medium px-3 py-2">Cantidad</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {claim.items.map((it) => (
+                          <tr key={it.id}>
+                            <td className="px-3 py-2 text-gray-800">{it.productName}</td>
+                            <td className="px-3 py-2 text-gray-500 font-mono text-xs">{it.sku}</td>
+                            <td className="px-3 py-2 text-right font-semibold text-gray-800 whitespace-nowrap">
+                              {it.quantity} <span className="text-xs font-normal text-gray-400">{it.unit}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {initialAtts.length > 0 && (
                 <div>

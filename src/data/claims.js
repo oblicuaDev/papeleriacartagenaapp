@@ -8,6 +8,9 @@ export const CLAIM_REASON_OPTIONS = [
   { value: "felicitacion_servicio", label: "Valoración o felicitación sobre el servicio prestado" },
 ];
 
+// Motivos sobre artículos: exigen elegir artículos y cantidades (igual que ITEM_REASONS en la API).
+export const CLAIM_ITEM_REASONS = ["no_llego_producto", "producto_averiado", "devolucion_producto"];
+
 export function claimReasonLabel(reason) {
   return CLAIM_REASON_OPTIONS.find((o) => o.value === reason)?.label || reason;
 }

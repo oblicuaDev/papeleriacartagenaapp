@@ -18,6 +18,9 @@ export const CLAIM_REASONS = {
   felicitacion_servicio: 'Valoración o felicitación sobre el servicio prestado',
 };
 const PRAISE_REASON = 'felicitacion_servicio';
+// Motivos sobre artículos: exigen indicar artículos y cantidades del pedido.
+// Los motivos sobre el servicio no llevan artículos.
+export const ITEM_REASONS = ['no_llego_producto', 'producto_averiado', 'devolucion_producto'];
 
 // Pedidos sobre los que se puede reclamar: ya aprobados y no devueltos.
 const NON_CLAIMABLE_STATUSES = ['Pendiente por aprobar', 'Rechazado', 'Devuelto'];
@@ -146,6 +149,61 @@ async function saveAttachments(db, claimId, files, userId, kind) {
   return saved;
 }
 
+// Artículos del pedido con la cantidad aún reclamable: cantidad pedida menos
+// lo ya reclamado en cualquier reclamo del pedido (abierto o cerrado).
+async function claimableItems(db, orderId) {
+  const { rows } = await db.query(
+    `SELECT oi.id, oi.product_id, oi.product_name, oi.sku, oi.unit, oi.quantity,
+            COALESCE(SUM(ci.quantity), 0)::int AS claimed_quantity
+       FROM order_items oi
+       LEFT JOIN claim_items ci ON ci.order_item_id = oi.id
+      WHERE oi.order_id = $1
+      GROUP BY oi.id
+      ORDER BY oi.id`,
+    [orderId]
+  );
+  return rows.map(r => ({ ...r, available_quantity: Math.max(0, r.quantity - r.claimed_quantity) }));
+}
+
+// Normaliza y valida los artículos enviados contra los reclamables del pedido.
+// Devuelve { items } o { error }.
+function validateClaimItems(raw, available) {
+  let list = raw;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch { return { error: 'Formato de artículos inválido' }; }
+  }
+  if (!Array.isArray(list) || list.length === 0) {
+    return { error: 'Selecciona al menos un artículo y su cantidad' };
+  }
+  const byId = new Map(available.map(i => [i.id, i]));
+  const seen = new Set();
+  const items = [];
+  for (const entry of list) {
+    const orderItemId = Number(entry?.orderItemId);
+    const qty = Number(entry?.quantity);
+    const item = byId.get(orderItemId);
+    if (!item) return { error: 'Uno de los artículos no pertenece al pedido' };
+    if (seen.has(orderItemId)) return { error: `"${item.product_name}" está repetido` };
+    seen.add(orderItemId);
+    if (!Number.isInteger(qty) || qty <= 0) {
+      return { error: `La cantidad de "${item.product_name}" debe ser un número entero mayor que cero` };
+    }
+    if (qty > item.available_quantity) {
+      return {
+        error: item.available_quantity === 0
+          ? `"${item.product_name}" ya fue reclamado en su totalidad`
+          : `La cantidad de "${item.product_name}" no puede superar ${item.available_quantity}`,
+      };
+    }
+    items.push({ ...item, claim_quantity: qty });
+  }
+  return { items };
+}
+
+const itemsSummary = (items) => items.length
+  ? ` Artículos: ${items.map(i => `${i.product_name} (${i.claim_quantity})`).join(', ')}.`
+  : '';
+
 const cleanupUploads = (urls) =>
   Promise.all(urls.map(u => deleteObject(u).catch(() => {})));
 
@@ -177,6 +235,25 @@ router.get('/', async (req, res) => {
   }
 });
 
+// ── GET /claims/claimable-items?orderId=ORD-00001 ───────────
+router.get('/claimable-items', async (req, res) => {
+  const orderId = String(req.query.orderId || '').toUpperCase();
+  if (!orderId) return res.status(422).json({ error: 'orderId es requerido' });
+  try {
+    const params = [orderId];
+    const scope = scopeCondition(req.user, params);
+    const { rows } = await pool.query(
+      `SELECT o.id FROM orders o JOIN users uc ON uc.id = o.client_id WHERE o.id = $1 AND ${scope}`,
+      params
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
+    return res.json({ data: await claimableItems(pool, orderId) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 // ── GET /claims/:id ──────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
@@ -202,6 +279,11 @@ router.get('/:id', async (req, res) => {
         ORDER BY a.uploaded_at ASC, a.id ASC`,
       [claim.id]
     );
+    const { rows: items } = await pool.query(
+      `SELECT id, order_item_id, product_id, product_name, sku, unit, quantity
+         FROM claim_items WHERE claim_id = $1 ORDER BY id`,
+      [claim.id]
+    );
 
     const expiresAt = new Date(new Date(claim.created_at).getTime() + CLAIM_ATTACHMENT_TTL_DAYS * 86400000);
     const daysLeft = Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / 86400000));
@@ -213,6 +295,7 @@ router.get('/:id', async (req, res) => {
       attachments_days_left: daysLeft,
       events,
       attachments,
+      items,
     });
   } catch (err) {
     console.error(err);
@@ -221,7 +304,8 @@ router.get('/:id', async (req, res) => {
 });
 
 // ── POST /claims ─────────────────────────────────────────────
-// multipart: orderId, reason, description (HTML), confirmDuplicate, files[]
+// multipart: orderId, reason, description (HTML), confirmDuplicate, files[],
+//            items (JSON: [{ orderItemId, quantity }], obligatorio en ITEM_REASONS)
 router.post('/', requireRole('client'), runUpload(upload.array('files', MAX_FILES)), async (req, res) => {
   const { id: userId, clientRole } = req.user;
   const files = req.files || [];
@@ -280,6 +364,18 @@ router.post('/', requireRole('client'), runUpload(upload.array('files', MAX_FILE
       });
     }
 
+    // Artículos reclamados: se validan con el pedido bloqueado para que dos
+    // reclamos simultáneos no superen la cantidad disponible.
+    let items = [];
+    if (ITEM_REASONS.includes(reason)) {
+      const result = validateClaimItems(req.body.items, await claimableItems(db, orderId));
+      if (result.error) {
+        await db.query('ROLLBACK');
+        return res.status(422).json({ error: result.error });
+      }
+      items = result.items;
+    }
+
     const { rows: idRows } = await db.query(`SELECT 'REC-' || LPAD(nextval('claims_seq')::text, 5, '0') AS id`);
     const claimId = idRows[0].id;
     const isPraise = reason === PRAISE_REASON;
@@ -294,11 +390,18 @@ router.post('/', requireRole('client'), runUpload(upload.array('files', MAX_FILE
        isPraise ? 'Cerrado' : 'Abierto', prevStatus,
        isPraise ? new Date() : null, isPraise ? userId : null]
     );
+    for (const it of items) {
+      await db.query(
+        `INSERT INTO claim_items (claim_id, order_item_id, product_id, product_name, sku, unit, quantity)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [claimId, it.id, it.product_id, it.product_name, it.sku, it.unit, it.claim_quantity]
+      );
+    }
     uploaded.push(...await saveAttachments(db, claimId, files, userId, 'initial'));
 
     await db.query(
       `INSERT INTO claim_events (claim_id, type, text, author_id) VALUES ($1,'created',$2,$3)`,
-      [claimId, CLAIM_REASONS[reason], userId]
+      [claimId, items.length ? `${CLAIM_REASONS[reason]}.${itemsSummary(items)}` : CLAIM_REASONS[reason], userId]
     );
 
     if (isPraise) {
@@ -310,7 +413,8 @@ router.post('/', requireRole('client'), runUpload(upload.array('files', MAX_FILE
         `[Reclamo ${claimId}] Valoración o felicitación registrada (cerrada automáticamente).`);
     } else {
       await setOrderStatus(db, order, 'En reclamación', userId, `Reclamo ${claimId} creado: ${CLAIM_REASONS[reason]}`);
-      await traceOnOrder(db, orderId, userId, `[Reclamo ${claimId}] Reclamo creado: ${CLAIM_REASONS[reason]}.`);
+      await traceOnOrder(db, orderId, userId,
+        `[Reclamo ${claimId}] Reclamo creado: ${CLAIM_REASONS[reason]}.${itemsSummary(items)}`);
     }
 
     await db.query('COMMIT');

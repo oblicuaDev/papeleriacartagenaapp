@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import pool from '../config/db.js';
 import { requireAuth, requireRole, requireAdminOrSupervisor } from '../middleware/auth.js';
+import { invalidateUserStatus } from '../lib/userStatus.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -196,6 +197,30 @@ router.put('/:id', async (req, res) => {
     allOrdersAccess,
   } = req.body;
 
+  // Mismas validaciones que en el alta.
+  if (name !== undefined && !String(name).trim()) {
+    return res.status(422).json({ error: 'El nombre es obligatorio' });
+  }
+  if (email !== undefined && !String(email).trim()) {
+    return res.status(422).json({ error: 'El email es obligatorio' });
+  }
+  if (password && password.length < 6) {
+    return res.status(422).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+  }
+
+  // Desactivar: solo admin, y nunca la propia cuenta (se quedaría sin acceso).
+  if (active === false && myRole === 'admin' && isSelf) {
+    return res.status(409).json({ error: 'No puedes desactivar tu propia cuenta' });
+  }
+
+  // La sucursal debe pertenecer a la empresa del usuario.
+  if (sucursalId !== undefined && sucursalId !== null && target.role === 'client') {
+    const { rows: suc } = await pool.query(
+      `SELECT 1 FROM sucursales WHERE id = $1 AND company_id = $2`, [sucursalId, target.company_id]
+    );
+    if (!suc[0]) return res.status(422).json({ error: 'La sucursal no pertenece a la empresa del usuario' });
+  }
+
   // El supervisor no puede sacar al usuario de su sucursal ni cambiarle el rol
   // a algo distinto de creador_pedidos (solo gestiona creadores de su sede).
   if (isSupervisor && !isSelf) {
@@ -233,9 +258,11 @@ router.put('/:id', async (req, res) => {
        RETURNING ${publicUserFields}`,
       params
     );
+    invalidateUserStatus(targetId);
     return res.json(rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'El email ya está registrado' });
+    if (err.code === '23514') return res.status(422).json({ error: 'Datos de usuario inválidos: ' + err.message });
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
@@ -288,6 +315,7 @@ router.delete('/:id', requireAdminOrSupervisor, async (req, res) => {
 
     await client.query(`DELETE FROM users WHERE id = $1`, [targetId]);
     await client.query('COMMIT');
+    invalidateUserStatus(targetId);
     return res.json({ message: 'Usuario eliminado definitivamente' });
   } catch (err) {
     await client.query('ROLLBACK');

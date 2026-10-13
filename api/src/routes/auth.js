@@ -24,13 +24,20 @@ router.post('/login', async (req, res) => {
     );
 
     const user = rows[0];
-    if (!user || !user.active) {
+    if (!user) {
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       return res.status(401).json({ error: 'Credenciales incorrectas' });
+    }
+    // Solo tras validar la contraseña se revela que la cuenta está inactiva.
+    if (!user.active) {
+      return res.status(403).json({
+        error: 'Tu cuenta está desactivada. Comunícate con el administrador.',
+        code: 'ACCOUNT_DISABLED',
+      });
     }
 
     const payload = {

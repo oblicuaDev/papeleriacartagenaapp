@@ -74,4 +74,15 @@ CREATE TABLE IF NOT EXISTS claim_events (
 );
 CREATE INDEX IF NOT EXISTS idx_claim_events_claim ON claim_events(claim_id, created_at);
 
+
+-- Permisos para el usuario de la API en produccion (las tablas las crea
+-- postgres; sin esto la API responde "permission denied for table claims").
+-- Condicionado: en dev el rol no existe.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'papeleria_user') THEN
+        GRANT SELECT, INSERT, UPDATE, DELETE ON claims, claim_attachments, claim_events TO papeleria_user;
+        GRANT USAGE, SELECT ON SEQUENCE claims_seq, claim_attachments_id_seq, claim_events_id_seq TO papeleria_user;
+    END IF;
+END $$;
 COMMIT;

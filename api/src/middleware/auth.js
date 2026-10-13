@@ -1,8 +1,11 @@
 import jwt from 'jsonwebtoken';
 import { tokenBlacklist } from '../lib/tokenBlacklist.js';
+import { isUserActive } from '../lib/userStatus.js';
 
-// Verifica el token JWT y adjunta el payload al request
-export function requireAuth(req, res, next) {
+// Verifica el token JWT y adjunta el payload al request.
+// Además exige que la cuenta siga activa: un usuario desactivado pierde el
+// acceso de inmediato aunque su token no haya expirado.
+export async function requireAuth(req, res, next) {
   const header = req.headers['authorization'];
   if (!header || !header.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Token requerido' });
@@ -11,12 +14,25 @@ export function requireAuth(req, res, next) {
   if (tokenBlacklist.has(token)) {
     return res.status(401).json({ error: 'Token inválido o expirado' });
   }
+  let payload;
   try {
-    req.user = jwt.verify(token, process.env.JWT_SECRET);
-    next();
+    payload = jwt.verify(token, process.env.JWT_SECRET);
   } catch {
     return res.status(401).json({ error: 'Token inválido o expirado' });
   }
+  try {
+    if (!(await isUserActive(payload.id))) {
+      return res.status(401).json({
+        error: 'Tu cuenta fue desactivada. Comunícate con el administrador.',
+        code: 'ACCOUNT_DISABLED',
+      });
+    }
+  } catch (err) {
+    console.error('requireAuth: no se pudo validar el estado del usuario', err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+  req.user = payload;
+  next();
 }
 
 // Restringe el acceso a roles específicos

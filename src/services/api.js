@@ -40,6 +40,14 @@ async function request(method, path, body = null, isFormData = false) {
   const raw = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
   const data = deepCamel(raw);
 
+  // Cuenta desactivada con la sesión abierta: se cierra y se vuelve al login.
+  if (res.status === 401 && data?.code === 'ACCOUNT_DISABLED') {
+    localStorage.removeItem('pc_token');
+    if (!window.location.pathname.startsWith('/login')) {
+      window.location.assign('/login?cuenta=desactivada');
+    }
+  }
+
   if (!res.ok) {
     const err = new Error(data?.error || `HTTP ${res.status}`);
     err.status = res.status;
@@ -191,11 +199,13 @@ export const ordersApi = {
 export const claimsApi = {
   list: (params = {}) => get('/claims?' + new URLSearchParams(params)),
   get:  (id)          => get(`/claims/${id}`),
-  create: ({ orderId, reason, description, files = [], confirmDuplicate = false }) => {
+  claimableItems: (orderId) => get('/claims/claimable-items?' + new URLSearchParams({ orderId })),
+  create: ({ orderId, reason, description, items = [], files = [], confirmDuplicate = false }) => {
     const fd = new FormData();
     fd.append('orderId', orderId);
     fd.append('reason', reason);
     fd.append('description', description);
+    if (items.length) fd.append('items', JSON.stringify(items));
     if (confirmDuplicate) fd.append('confirmDuplicate', 'true');
     files.forEach((f) => fd.append('files', f));
     return postForm('/claims', fd);

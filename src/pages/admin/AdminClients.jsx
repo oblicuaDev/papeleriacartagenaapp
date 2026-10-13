@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Plus, X, Phone, MapPin, Calendar, Building, GitBranch, Info } from 'lucide-react';
+import { Plus, X, Phone, MapPin, Calendar, Building, GitBranch, Info, Pencil, UserX, UserCheck } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { usersApi } from '../../services/api';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 function Modal({ title, onClose, children }) {
   return (
@@ -34,9 +35,20 @@ const CLIENT_ROLE_BADGES = {
 export default function AdminClients() {
   const { users, refreshUsers, priceLists, companies } = useApp();
   const [showModal, setShowModal] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'inactive'
+  const [statusTarget, setStatusTarget] = useState(null);  // cliente a activar/desactivar
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusError, setStatusError] = useState(null);
 
-  const clients = users.filter(u => u.role === 'client');
+  const allClients = users.filter(u => u.role === 'client');
+  const clients = allClients.filter(u =>
+    statusFilter === 'all' ? true : statusFilter === 'active' ? u.active : !u.active
+  );
+  const inactiveCount = allClients.filter(u => !u.active).length;
 
   // Lista heredada: sucursal -> empresa -> nada
   function getInheritedPriceList(client) {
@@ -62,7 +74,26 @@ export default function AdminClients() {
     : [];
 
   function openCreate() {
+    setEditingUser(null);
     setForm(EMPTY_FORM);
+    setError(null);
+    setShowModal(true);
+  }
+
+  function openEdit(client) {
+    setEditingUser(client);
+    setForm({
+      name:        client.name || '',
+      contactName: client.contactName || '',
+      email:       client.email || '',
+      password:    '',
+      phone:       client.phone || '',
+      address:     client.address || '',
+      companyId:   client.companyId ?? '',
+      sucursalId:  client.sucursalId ?? '',
+      clientRole:  client.clientRole || 'creador_pedidos',
+    });
+    setError(null);
     setShowModal(true);
   }
 
@@ -71,21 +102,74 @@ export default function AdminClients() {
   }
 
   async function handleSave() {
-    if (!form.name || !form.email || !form.password) return;
-    await usersApi.create({
-      name:        form.name,
-      contactName: form.contactName,
-      email:       form.email,
-      password:    form.password,
-      phone:       form.phone,
-      address:     form.address,
-      companyId:   form.companyId ? Number(form.companyId) : null,
-      sucursalId:  form.sucursalId ? Number(form.sucursalId) : null,
-      clientRole:  form.clientRole,
-      role:        'client',
-    });
-    await refreshUsers();
-    setShowModal(false);
+    if (!form.name.trim() || !form.email.trim()) {
+      setError('Nombre y email son obligatorios');
+      return;
+    }
+    if (!editingUser && !form.password) {
+      setError('La contraseña es obligatoria al crear');
+      return;
+    }
+    if (form.password && form.password.length < 6) {
+      setError('La contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+    if (!form.companyId || !form.sucursalId) {
+      setError('Selecciona la empresa y la sucursal');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      if (editingUser) {
+        // La empresa no se cambia en la edición (la API no lo permite):
+        // solo la sucursal dentro de la misma empresa.
+        const payload = {
+          name:        form.name.trim(),
+          contactName: form.contactName,
+          email:       form.email,
+          phone:       form.phone,
+          address:     form.address,
+          sucursalId:  Number(form.sucursalId),
+          clientRole:  form.clientRole,
+        };
+        if (form.password) payload.password = form.password;
+        await usersApi.update(editingUser.id, payload);
+      } else {
+        await usersApi.create({
+          name:        form.name.trim(),
+          contactName: form.contactName,
+          email:       form.email,
+          password:    form.password,
+          phone:       form.phone,
+          address:     form.address,
+          companyId:   Number(form.companyId),
+          sucursalId:  Number(form.sucursalId),
+          clientRole:  form.clientRole,
+          role:        'client',
+        });
+      }
+      await refreshUsers();
+      setShowModal(false);
+    } catch (err) {
+      setError(err?.message || 'No se pudo guardar el cliente');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggleActive() {
+    setStatusBusy(true);
+    setStatusError(null);
+    try {
+      await usersApi.update(statusTarget.id, { active: !statusTarget.active });
+      await refreshUsers();
+      setStatusTarget(null);
+    } catch (err) {
+      setStatusError(err?.message || 'No se pudo actualizar el estado del cliente');
+    } finally {
+      setStatusBusy(false);
+    }
   }
 
   const inputClass = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent';
@@ -96,8 +180,22 @@ export default function AdminClients() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Clientes</h2>
-          <p className="text-sm text-gray-500 mt-1">{clients.length} clientes registrados</p>
+          <p className="text-sm text-gray-500 mt-1">
+            {allClients.length} clientes registrados
+            {inactiveCount > 0 && <> · {inactiveCount} inactivo{inactiveCount !== 1 ? 's' : ''}</>}
+          </p>
         </div>
+        <div className="flex items-center gap-2">
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          aria-label="Filtrar por estado"
+        >
+          <option value="all">Todos los estados</option>
+          <option value="active">Activos</option>
+          <option value="inactive">Inactivos</option>
+        </select>
         <button
           onClick={openCreate}
           className="flex items-center gap-2 px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition"
@@ -105,6 +203,7 @@ export default function AdminClients() {
           <Plus className="w-4 h-4" />
           Nuevo Cliente
         </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -119,11 +218,13 @@ export default function AdminClients() {
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Lista de Precios</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Dirección</th>
                 <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Fecha</th>
+                <th className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Estado</th>
+                <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {clients.map(client => (
-                <tr key={client.id} className="hover:bg-gray-50 transition-colors">
+                <tr key={client.id} className={`hover:bg-gray-50 transition-colors ${client.active ? '' : 'opacity-60'}`}>
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
@@ -196,12 +297,39 @@ export default function AdminClients() {
                       {client.createdAt || '—'}
                     </div>
                   </td>
+                  <td className="px-5 py-4">
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${client.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {client.active ? 'Activo' : 'Inactivo'}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-1 justify-end">
+                      <button
+                        onClick={() => openEdit(client)}
+                        title="Editar"
+                        className="p-1.5 text-gray-400 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => { setStatusError(null); setStatusTarget(client); }}
+                        title={client.active ? 'Desactivar' : 'Reactivar'}
+                        className={`p-1.5 rounded-lg transition ${
+                          client.active
+                            ? 'text-gray-400 hover:text-amber-700 hover:bg-amber-50'
+                            : 'text-gray-400 hover:text-green-700 hover:bg-green-50'
+                        }`}
+                      >
+                        {client.active ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {clients.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-gray-400">
-                    No hay clientes registrados
+                  <td colSpan={9} className="px-5 py-10 text-center text-sm text-gray-400">
+                    {allClients.length ? 'No hay clientes con este estado' : 'No hay clientes registrados'}
                   </td>
                 </tr>
               )}
@@ -210,8 +338,25 @@ export default function AdminClients() {
         </div>
       </div>
 
+      {statusTarget && (
+        <ConfirmDialog
+          title={statusTarget.active ? 'Desactivar cliente' : 'Reactivar cliente'}
+          tone={statusTarget.active ? 'danger' : 'primary'}
+          confirmLabel={statusTarget.active ? 'Sí, desactivar' : 'Sí, reactivar'}
+          message={statusTarget.active ? (
+            <>¿Desactivar a <strong>{statusTarget.name}</strong>? No podrá iniciar sesión ni usar el sistema. Sus pedidos, reclamos e historial se conservan y puede reactivarse en cualquier momento.</>
+          ) : (
+            <>¿Reactivar a <strong>{statusTarget.name}</strong>? Podrá volver a iniciar sesión.</>
+          )}
+          busy={statusBusy}
+          error={statusError}
+          onConfirm={handleToggleActive}
+          onCancel={() => setStatusTarget(null)}
+        />
+      )}
+
       {showModal && (
-        <Modal title="Nuevo Cliente" onClose={() => setShowModal(false)}>
+        <Modal title={editingUser ? `Editar ${editingUser.name}` : 'Nuevo Cliente'} onClose={() => setShowModal(false)}>
           <div className="space-y-4">
             {/* Empresa + Sucursal */}
             <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 space-y-3">
@@ -222,6 +367,7 @@ export default function AdminClients() {
                   className={inputClass}
                   value={form.companyId}
                   onChange={handleCompanyChange}
+                  disabled={!!editingUser}
                 >
                   <option value="">— Seleccionar empresa —</option>
                   {companies.map(c => (
@@ -243,6 +389,9 @@ export default function AdminClients() {
                   ))}
                 </select>
               </div>
+              {editingUser && (
+                <p className="text-xs text-blue-700/80">La empresa no se puede cambiar; sí la sucursal dentro de la misma empresa.</p>
+              )}
             </div>
 
             {/* User data */}
@@ -260,8 +409,8 @@ export default function AdminClients() {
                 <input className={inputClass} type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="cliente@empresa.com" />
               </div>
               <div>
-                <label className={labelClass}>Contraseña *</label>
-                <input className={inputClass} type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="••••••••" />
+                <label className={labelClass}>{editingUser ? 'Nueva contraseña' : 'Contraseña *'}</label>
+                <input className={inputClass} type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder={editingUser ? 'Vacío = no cambiar' : '••••••••'} />
               </div>
             </div>
             <div>
@@ -285,21 +434,27 @@ export default function AdminClients() {
                 <option value="creador_pedidos">Creador de pedidos</option>
                 <option value="supervisor">Supervisor</option>
                 <option value="administrador_contrato">Administrador de Contrato</option>
+                {editingUser?.clientRole === 'admin_empresa' && (
+                  <option value="admin_empresa">Administrador de Empresa</option>
+                )}
               </select>
               <p className="text-xs text-gray-400 mt-1">
                 {form.clientRole === 'supervisor'
                   ? 'Puede crear pedidos y aprobar los pedidos de creadores de su sucursal.'
                   : form.clientRole === 'administrador_contrato'
                   ? 'Como supervisor, pero ve y aprueba pedidos de TODAS las sucursales de la empresa.'
+                  : form.clientRole === 'admin_empresa'
+                  ? 'Consulta y administra la información de su empresa.'
                   : 'Crea pedidos que quedan pendientes de aprobación por un supervisor.'}
               </p>
             </div>
+            {error && <p className="text-xs text-red-600">{error}</p>}
             <div className="flex gap-3 pt-2">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
+              <button onClick={() => setShowModal(false)} disabled={saving} className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition disabled:opacity-50">
                 Cancelar
               </button>
-              <button onClick={handleSave} className="flex-1 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition">
-                Crear Cliente
+              <button onClick={handleSave} disabled={saving} className="flex-1 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition disabled:opacity-50">
+                {saving ? 'Guardando...' : editingUser ? 'Guardar cambios' : 'Crear Cliente'}
               </button>
             </div>
           </div>

@@ -1,6 +1,6 @@
 import logo from "../logo-cartagena.jpg";
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { Mail, Lock, LogIn, Eye, EyeOff, BookOpen } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import CreditsFooter from "../components/CreditsFooter";
@@ -11,7 +11,13 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
+  const [searchParams] = useSearchParams();
+  // Llega aquí con ?cuenta=desactivada cuando la API rechaza la sesión de una cuenta desactivada.
+  const [error, setError] = useState(
+    searchParams.get("cuenta") === "desactivada"
+      ? "Tu cuenta fue desactivada. Comunícate con el administrador."
+      : "",
+  );
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e) {

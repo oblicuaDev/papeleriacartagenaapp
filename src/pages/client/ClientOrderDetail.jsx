@@ -16,8 +16,8 @@ import { STATUS_STYLES, formatCOP, aggregateOrderIva, ivaRateLabel } from '../..
 // Un pedido solo se edita ANTES de su aprobación formal. Aprobado = cerrado.
 const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente'];
 
-// Estados sobre los que no se puede crear un reclamo.
-const CLAIM_BLOCKED_STATUSES = ['Pendiente por aprobar', 'Rechazado', 'Devuelto'];
+// Solo se puede reclamar un pedido ya entregado.
+const CLAIM_ALLOWED_STATUS = 'Entregado';
 
 function fileIcon(type = '') {
   if (type.startsWith('image/')) return <ImageIcon className="w-4 h-4 text-blue-500" />;
@@ -133,10 +133,10 @@ export default function ClientOrderDetail() {
     return () => { cancelled = true; };
   }, [order?.id, order?.status]);
 
-  // Reclamos: se pueden crear sobre pedidos ya aprobados (no devueltos). admin_empresa es solo lectura.
+  // Reclamos: solo sobre pedidos ya entregados. admin_empresa es solo lectura.
   const canCreateClaim = order &&
     currentUser?.clientRole !== 'admin_empresa' &&
-    !CLAIM_BLOCKED_STATUSES.includes(order.status);
+    order.status === CLAIM_ALLOWED_STATUS;
 
   async function handleClaimsChanged() {
     try {

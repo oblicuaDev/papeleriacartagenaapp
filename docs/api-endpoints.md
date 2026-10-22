@@ -397,7 +397,43 @@ Actualiza estado, asesor, repartidor, notas o transportista.
 ```
 
 ### `PUT /orders/:id/items`
-Modifica items de un pedido (solo admin, en estados tempranos).
+Modifica los items de un pedido: cambiar cantidades, eliminar y **agregar productos nuevos**. Solo mientras el pedido está `Pendiente por aprobar` (o `Pendiente` legacy); en cualquier otro estado responde 409.
+
+Autorizados: admin, asesor (el suyo o con cobertura total), `creador_pedidos` (solo los suyos), `supervisor` (su sucursal), `administrador_contrato` (toda su empresa).
+
+```json
+{
+  "items": [
+    { "productId": 12, "quantity": 5 },
+    { "productId": 40, "quantity": 2 }
+  ],
+  "reason": "Se agrega resma faltante"
+}
+```
+
+- `items` es el estado final deseado: lo que no venga se elimina; un `productId` que no estaba en el pedido se agrega.
+- El precio y la tasa de IVA de los productos nuevos los resuelve el backend con las listas de precios del **cliente del pedido** y su contrato vigente (mismas reglas que `POST /orders`). Fuera de contrato → 409; producto o categoría inactivos → 409.
+- `reason` obligatorio. Cada cambio queda en `order_item_changes` (`updated` / `removed` / `added`) y en un comentario de sistema. Recalcula total, subtotal y desglose de IVA.
+
+### `GET /orders/:id/addable-products?search=`
+Buscador de productos para agregar a un pedido en edición. Mismos permisos y estados que `PUT /orders/:id/items`. Devuelve hasta `limit` (default 15, máx. 30) productos activos del catálogo del cliente del pedido (contrato vigente + precio de sus listas).
+
+```json
+{ "data": [ { "id": 3, "name": "BIBLIA ...", "sku": "10113400012", "unit": "Unidad", "price": 27000, "ivaRate": 5 } ] }
+```
+
+### `POST /orders/:id/revoke-approval`
+Revoca la aprobación de un pedido: `Validar disponibilidad` → `Pendiente por aprobar`, para poder corregirlo antes del alistamiento.
+
+```json
+{ "reason": "Faltan productos por agregar" }
+```
+
+- Autorizados: admin, `supervisor` (su sucursal), `administrador_contrato` (su empresa). El asesor no.
+- Solo desde `Validar disponibilidad` → si no, 409. `reason` obligatorio → 422.
+- Transaccional con bloqueo de fila: dos revocaciones simultáneas → la segunda recibe 409.
+- Elimina el adjunto `purchase_order`; la orden de compra se regenera al volver a aprobar.
+- Registra en `order_status_log` (usuario, fecha, `reason` = `"Aprobacion revocada: ..."`) y un comentario de sistema.
 
 ### `GET /orders/:id/timeline`
 Historial de cambios de estado del pedido.

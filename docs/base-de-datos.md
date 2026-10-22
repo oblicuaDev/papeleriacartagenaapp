@@ -319,5 +319,9 @@ Las migraciones están en `infra/migrations/` numeradas secuencialmente:
 | `009_decouple_user_price_list.sql`             | Override de lista de precios por usuario       |
 | `010_category_relations_and_company_budget.sql`| Relaciones entre categorías                    |
 | `011_order_item_changes.sql`                   | Cambios en ítems de pedido post-creación       |
+| `012` – `020`                                  | Ver encabezado de cada archivo (catálogo, IVA por producto, contratos, reclamos, etc.) |
+| `021_order_item_added.sql`                     | `order_item_changes.action` admite `added` (agregar productos a un pedido pendiente) |
+
+> Solo `infra/migrate.sql` se ejecuta en dev y prod: cada migración nueva debe fusionarse ahí (la 021 está en la sección 23).
 
 El archivo `infra/migrate.sql` contiene el schema completo consolidado (todas las migraciones aplicadas).

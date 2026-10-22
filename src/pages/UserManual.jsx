@@ -98,7 +98,11 @@ const STEPS = [
 const FAQS = [
   {
     q: '¿Puedo modificar un pedido después de confirmarlo?',
-    a: 'Una vez confirmado, contacta a tu asesor comercial directamente para solicitar modificaciones antes de que el pedido sea procesado y alistado.',
+    a: 'Sí, mientras esté "Pendiente por aprobar": abre el pedido y usa "Modificar pedido" para cambiar cantidades, eliminar productos o agregar productos nuevos del catálogo. Debes indicar el motivo del cambio. Una vez aprobado ya no se puede modificar.',
+  },
+  {
+    q: '¿Y si el pedido ya fue aprobado y necesito corregirlo?',
+    a: 'Si todavía no ha pasado a alistamiento, el supervisor o el administrador de contrato que puede aprobarlo puede usar "Revocar aprobación" en el detalle del pedido. El pedido vuelve a "Pendiente por aprobar", se corrige y se aprueba de nuevo. La revocación queda registrada en el historial con el usuario, la fecha y el motivo.',
   },
   {
     q: '¿Cuánto tiempo tarda en llegar mi pedido?',

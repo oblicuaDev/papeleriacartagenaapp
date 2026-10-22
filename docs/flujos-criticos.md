@@ -161,16 +161,24 @@ Los datos se recargan con `refreshXxx()` después de operaciones CRUD para mante
 
 Solo roles autorizados pueden cambiar a ciertos estados:
 
-| Transición                                 | Rol requerido         |
-|--------------------------------------------|-----------------------|
-| `Pendiente por aprobar` → `Pendiente`      | `supervisor`          |
-| `Pendiente por aprobar` → `Rechazado`      | `supervisor`          |
-| `Pendiente` → `Validar disponibilidad`     | `admin`               |
-| `Validar disponibilidad` → `Alistamiento`  | `admin`               |
-| `Alistamiento` → `En Ruta`                 | `admin`               |
-| `En Ruta` → `Entregado`                    | `admin` / `delivery`  |
+| Transición                                              | Rol requerido                                                    |
+|---------------------------------------------------------|------------------------------------------------------------------|
+| `Pendiente por aprobar` → `Validar disponibilidad` (aprobar) | `admin` / `supervisor` (su sucursal) / `administrador_contrato` |
+| `Pendiente por aprobar` → `Rechazado`                   | `admin` / `supervisor` (su sucursal) / `administrador_contrato`  |
+| `Validar disponibilidad` → `Pendiente por aprobar` (revocar aprobación) | `admin` / `supervisor` (su sucursal) / `administrador_contrato` — vía `POST /orders/:id/revoke-approval` |
+| `Pendiente` (legacy) → `Validar disponibilidad`         | `admin` / `advisor`                                              |
+| `Validar disponibilidad` → `Alistamiento`               | `admin` / `advisor` (automático al asignar repartidor)           |
+| `Alistamiento` → `En Ruta`                              | `admin` / `delivery`                                             |
+| `En Ruta` → `Entregado`                                 | `admin` / `delivery` (requiere evidencia)                        |
 
 Cada cambio genera un registro en `order_status_log` con `from_status`, `to_status`, `changed_by`, y `reason` opcional.
+
+### Edición de items y revocación de aprobación
+
+- Los items de un pedido (cantidades, eliminar, **agregar productos**) solo se modifican mientras está `Pendiente por aprobar`. Una vez aprobado queda cerrado.
+- Si hay que corregir un pedido ya aprobado que todavía no entra a `Alistamiento`, quien puede aprobarlo **revoca la aprobación** (con motivo y confirmación): el pedido vuelve a `Pendiente por aprobar`, se elimina la orden de compra generada, se edita y se aprueba de nuevo (la orden de compra se regenera con los items corregidos).
+- Presupuesto del contrato y estadísticas no requieren ajuste: ya excluyen los pedidos `Pendiente por aprobar`.
+- Trazabilidad: `order_status_log` (quién, cuándo, motivo), `order_item_changes` (cada cambio de item) y comentarios de sistema en `order_comments`; todo aparece en `GET /orders/:id/timeline`.
 
 ---
 

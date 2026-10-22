@@ -38,8 +38,11 @@ import {
   Clock,
   ArrowRight,
   FileBadge,
+  Undo2,
 } from "lucide-react";
 import OrderClaimsPanel from "./OrderClaimsPanel";
+import AddOrderProductSearch from "./AddOrderProductSearch";
+import { RevokeApprovalModal } from "./OrderApprovalModals";
 import { STATUS_STYLES, ORDER_STATUSES, formatCOP, statusLabel, aggregateOrderIva, ivaRateLabel } from "../data/mockData";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -183,15 +186,30 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
 
   function toggleRemove(productId) {
     setDraft((prev) =>
-      prev.map((it) =>
-        it.productId === productId ? { ...it, removed: !it.removed } : it,
-      ),
+      prev
+        .map((it) => (it.productId === productId ? { ...it, removed: !it.removed } : it))
+        // un producto recién agregado se quita del todo
+        .filter((it) => !(it.productId === productId && it.added && it.removed)),
     );
+  }
+
+  function addProduct(p) {
+    setDraft((prev) => {
+      const existing = prev.find((it) => it.productId === p.id);
+      // Si era un artículo del pedido marcado para eliminar, se restaura.
+      if (existing) return prev.map((it) => (it.productId === p.id ? { ...it, removed: false } : it));
+      return [...prev, {
+        productId: p.id, productName: p.name, sku: p.sku, unit: p.unit,
+        unitPrice: Number(p.price) || 0, quantity: 1,
+        ivaRate: Number(p.ivaRate ?? 19), removed: false, added: true,
+      }];
+    });
   }
 
   const hasChanges = (() => {
     const orig = new Map((localItems || []).map((it) => [it.productId, it]));
     return draft.some((it) => {
+      if (it.added) return true;
       const o = orig.get(it.productId);
       if (!o) return false;
       if (it.removed) return true;
@@ -309,10 +327,11 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
             ))}
 
             {editing && draft.map((item) => (
-              <tr key={item.productId} className={item.removed ? "bg-red-50" : "hover:bg-gray-50"}>
+              <tr key={item.productId} className={item.removed ? "bg-red-50" : item.added ? "bg-emerald-50" : "hover:bg-gray-50"}>
                 <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{item.sku || getSku(item.productId)}</td>
                 <td className={`px-5 py-3 text-sm font-medium ${item.removed ? "line-through text-gray-400" : "text-gray-800"}`}>
                   {item.productName}
+                  {item.added && <span className="ml-2 text-[10px] font-semibold uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">nuevo</span>}
                 </td>
                 <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                 <td className="px-5 py-3 text-sm text-gray-700 text-center">
@@ -337,7 +356,7 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
                         : "text-red-600 hover:bg-red-50"
                     }`}
                   >
-                    {item.removed ? "Restaurar" : "Eliminar"}
+                    {item.removed ? "Restaurar" : item.added ? "Quitar" : "Eliminar"}
                   </button>
                 </td>
               </tr>
@@ -371,6 +390,11 @@ function ItemsCard({ order, getSku, currentUser, onSaved, refreshComments }) {
 
       {editing && (
         <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 space-y-3">
+          <AddOrderProductSearch
+            orderId={order.id}
+            inOrderIds={new Set(draft.filter((it) => !it.removed).map((it) => it.productId))}
+            onAdd={addProduct}
+          />
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">
               Motivo de la modificacion <span className="text-red-500">*</span>
@@ -629,6 +653,28 @@ export default function OrderDetailCRM({
   const purchaseOrderAvailable =
     order.status !== "Pendiente por aprobar" && order.status !== "Rechazado";
 
+  // Revocar aprobación: solo admin, mientras el pedido no entre a Alistamiento.
+  const canRevoke = currentUser?.role === "admin" && order.status === "Validar disponibilidad";
+  const [showRevoke, setShowRevoke] = useState(false);
+  const [revokeError, setRevokeError] = useState(null);
+  async function handleRevoke(reason) {
+    setRevokeError(null);
+    try {
+      await ordersApi.revokeApproval(order.id, reason);
+      const fresh = await ordersApi.get(order.id);
+      Object.assign(order, fresh);
+      setStatus(fresh.status);
+      if (Array.isArray(fresh.comments)) setLocalComments(fresh.comments);
+      if (Array.isArray(fresh.attachments)) setLocalAttachments(fresh.attachments);
+      setTimelineRefreshKey((k) => k + 1);
+      refreshOrders?.();
+    } catch (err) {
+      setRevokeError(err?.message || "No se pudo revocar la aprobación");
+    } finally {
+      setShowRevoke(false);
+    }
+  }
+
   const [openingPurchaseOrder, setOpeningPurchaseOrder] = useState(false);
   async function handleOpenPurchaseOrder() {
     if (!purchaseOrderAvailable || openingPurchaseOrder) return;
@@ -698,6 +744,15 @@ export default function OrderDetailCRM({
         </button>
 
         <div className="flex items-center gap-2">
+          {canRevoke && (
+            <button
+              onClick={() => setShowRevoke(true)}
+              className="flex items-center gap-2 px-4 py-2 border-2 border-amber-200 text-amber-700 rounded-lg text-sm font-semibold hover:bg-amber-50 transition"
+            >
+              <Undo2 className="w-4 h-4" />
+              Revocar aprobación
+            </button>
+          )}
           <button
             onClick={handleOpenPurchaseOrder}
             disabled={!purchaseOrderAvailable || openingPurchaseOrder}
@@ -726,6 +781,19 @@ export default function OrderDetailCRM({
           </button>
         </div>
       </div>
+
+      {revokeError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm">
+          {revokeError}
+        </div>
+      )}
+      {showRevoke && (
+        <RevokeApprovalModal
+          order={order}
+          onConfirm={handleRevoke}
+          onCancel={() => setShowRevoke(false)}
+        />
+      )}
 
       {/* ── Two-column layout ─────────────────────────────────────────── */}
       <div className="flex gap-5 items-start">
@@ -1132,6 +1200,14 @@ export default function OrderDetailCRM({
                                     {ev.payload?.productName}
                                   </span>
                                   {" "}(cant. {ev.payload?.prevQuantity})
+                                </>
+                              ) : ev.payload?.action === "added" ? (
+                                <>
+                                  Agrego{" "}
+                                  <span className="font-medium">
+                                    {ev.payload?.productName}
+                                  </span>
+                                  {" "}(cant. {ev.payload?.newQuantity})
                                 </>
                               ) : (
                                 <>

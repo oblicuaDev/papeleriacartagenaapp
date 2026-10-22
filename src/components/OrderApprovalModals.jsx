@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { XCircle, CheckCircle2, AlertTriangle } from "lucide-react";
+import { XCircle, CheckCircle2, AlertTriangle, Undo2 } from "lucide-react";
 import { formatCOP } from "../data/mockData";
 
 // Modales de aprobación / rechazo de pedidos, compartidos entre
@@ -86,7 +86,7 @@ export function ConfirmApproveModal({ order, onConfirm, onCancel }) {
             <p className="text-sm text-gray-600 leading-relaxed">
               Al aprobarlo se generará una orden de compra a{" "}
               <span className="font-semibold text-gray-800">Papelería Cartagena</span>.
-              Una vez aprobado ya no se podrá modificar. Esta acción no se puede deshacer.
+              Una vez aprobado ya no se podrá modificar, salvo que se revoque la aprobación antes de que entre a alistamiento.
             </p>
             {order && (
               <p className="text-xs font-mono text-gray-400 bg-gray-50 rounded-lg px-3 py-1.5 inline-block">
@@ -107,6 +107,84 @@ export function ConfirmApproveModal({ order, onConfirm, onCancel }) {
             >
               <CheckCircle2 className="w-4 h-4" />
               Sí, aprobar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Revocar la aprobación de un pedido que aún no entra a Alistamiento:
+// vuelve a "Pendiente por aprobar" para poder corregirlo.
+export function RevokeApprovalModal({ order, onConfirm, onCancel }) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleConfirm() {
+    if (!reason.trim()) {
+      setError("Debes indicar el motivo de la revocación");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onConfirm(reason.trim());
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black bg-opacity-60">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="p-6 space-y-5">
+          <div className="flex justify-center">
+            <div className="w-14 h-14 bg-amber-100 rounded-full flex items-center justify-center">
+              <Undo2 className="w-7 h-7 text-amber-600" />
+            </div>
+          </div>
+          <div className="text-center space-y-2">
+            <h3 className="text-lg font-bold text-gray-900">
+              ¿Revocar la aprobación de este pedido?
+            </h3>
+            <p className="text-sm text-gray-600 leading-relaxed">
+              El pedido volverá a <span className="font-semibold text-gray-800">Pendiente por aprobar</span>,
+              la orden de compra generada quedará sin efecto y se podrá modificar antes de aprobarlo de nuevo.
+              Quedará registrado en el historial del pedido.
+            </p>
+            {order && (
+              <p className="text-xs font-mono text-gray-400 bg-gray-50 rounded-lg px-3 py-1.5 inline-block">
+                {order.id} · {formatCOP(order.total)}
+              </p>
+            )}
+          </div>
+          <div>
+            <textarea
+              value={reason}
+              onChange={(e) => { setReason(e.target.value); setError(""); }}
+              rows={3}
+              placeholder="Ej: falta agregar productos, cantidades incorrectas..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
+              maxLength={500}
+            />
+            {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={onCancel}
+              disabled={submitting}
+              className="flex-1 py-2.5 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={submitting}
+              className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2"
+            >
+              <Undo2 className="w-4 h-4" />
+              {submitting ? "Revocando..." : "Sí, revocar"}
             </button>
           </div>
         </div>

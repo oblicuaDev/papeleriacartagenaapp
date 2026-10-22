@@ -892,16 +892,115 @@ router.put('/:id', async (req, res) => {
 // items, tampoco el asesor, para que el despacho coincida con lo aprobado.
 const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente'];
 
+// Quien puede modificar los items de un pedido: admin, asesor (el suyo o con
+// cobertura total), el gestor del pedido (solo el suyo), supervisor (su
+// sucursal) y administrador_contrato (toda su empresa).
+// Devuelve null si esta autorizado, o { status, error } si no.
+async function itemEditDenial(req, order, db) {
+  const { role, id: myId, clientRole, companyId, sucursalId } = req.user;
+  const allOrders = role === 'advisor' && req.user.allOrdersAccess;
+
+  let authorized = false;
+  if (role === 'admin' || role === 'advisor') {
+    authorized = true;
+  } else if (role === 'client' && clientRole === 'creador_pedidos') {
+    authorized = order.client_id === myId;
+  } else if (role === 'client' && clientRole === 'supervisor') {
+    const { rows: cu } = await db.query(
+      `SELECT company_id, sucursal_id FROM users WHERE id = $1`, [order.client_id]
+    );
+    authorized = cu[0]?.company_id === companyId && cu[0]?.sucursal_id === sucursalId;
+  } else if (role === 'client' && clientRole === 'administrador_contrato') {
+    const { rows: cu } = await db.query(
+      `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
+    );
+    authorized = cu[0]?.company_id === companyId;
+  }
+  if (!authorized) {
+    return { status: 403, error: 'No tiene permiso para modificar items de este pedido' };
+  }
+  if (role === 'advisor' && order.advisor_id && order.advisor_id !== myId && !allOrders) {
+    return { status: 403, error: 'Pedido asignado a otro asesor' };
+  }
+  return null;
+}
+
+// Contexto de precios del CLIENTE del pedido (no de quien edita): misma
+// cadena de listas y mismo contrato vigente que aplico POST /orders.
+async function orderPricingContext(order, db, firstParamIndex) {
+  const { rows: cliRows } = await db.query(
+    `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
+  );
+  const contractProductIds = await resolveActiveContractProductIds(cliRows[0]?.company_id ?? null, db);
+  const { priceListChain } = await resolveOrderRouting(order.client_id, db);
+  const listIdParams = priceListChain.map((_, i) => `$${i + firstParamIndex}`);
+  const { select: priceSelect, join: priceJoin } = priceSqlFragmentChain({ alias: 'p', listIdParams });
+  return { contractProductIds, priceListChain, priceSelect, priceJoin };
+}
+
+// GET /orders/:id/addable-products?search=texto
+// Buscador de productos para agregar a un pedido en edicion. Respeta las
+// reglas del catalogo del cliente del pedido: activos, categoria activa,
+// contrato vigente y precio segun sus listas.
+router.get('/:id/addable-products', async (req, res) => {
+  const orderId = req.params.id.toUpperCase();
+  const search = String(req.query.search || '').trim();
+  const limit = Math.min(30, Math.max(1, parseInt(req.query.limit) || 15));
+
+  try {
+    const { rows: orderRows } = await pool.query(`SELECT * FROM orders WHERE id = $1`, [orderId]);
+    const order = orderRows[0];
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado' });
+    if (!ITEM_EDITABLE_STATUSES.includes(order.status)) {
+      return res.status(409).json({ error: 'Solo se pueden agregar productos a pedidos pendientes de aprobacion' });
+    }
+    const denial = await itemEditDenial(req, order, pool);
+    if (denial) return res.status(denial.status).json({ error: denial.error });
+
+    if (!search) return res.json({ data: [] });
+
+    const { contractProductIds, priceListChain, priceSelect, priceJoin } =
+      await orderPricingContext(order, pool, 1);
+
+    const params = [...priceListChain];
+    const conditions = ['p.active = true', 'c.active = true'];
+    if (contractProductIds) {
+      conditions.push(`p.id = ANY($${params.push([...contractProductIds])}::int[])`);
+    }
+    const sIdx = params.push('%' + search + '%');
+    conditions.push(`(p.name ILIKE $${sIdx} OR p.sku ILIKE $${sIdx})`);
+
+    const { rows } = await pool.query(
+      `SELECT p.id, p.name, p.sku, p.unit,
+              ${priceSelect} AS price,
+              p.iva_rate AS "ivaRate"
+         FROM products p
+         JOIN categories c ON c.id = p.category_id
+         ${priceJoin}
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY p.name
+        LIMIT $${params.push(limit)}`,
+      params
+    );
+    return res.json({
+      data: rows.map(r => ({ ...r, price: Number(r.price), ivaRate: Number(r.ivaRate) })),
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 // PUT /orders/:id/items
 // Modificacion de items solo mientras el pedido esta "Pendiente por aprobar".
-// Permite cambiar cantidades o eliminar items (no agregar productos nuevos).
-// Autorizado para: admin, el gestor del pedido (solo el suyo), supervisor
-// (su sucursal) y administrador_contrato (toda su empresa).
+// Permite cambiar cantidades, eliminar items y agregar productos nuevos (el
+// precio y la tasa de IVA de los nuevos los resuelve el backend con las mismas
+// reglas que POST /orders: listas del cliente + contrato vigente).
+// Autorizado segun itemEditDenial().
 // Cada modificacion exige un comentario y queda en order_item_changes +
 // order_comments. Recalcula total/IVA.
 router.put('/:id/items', async (req, res) => {
-  const { role, id: myId, clientRole, companyId, sucursalId } = req.user;
-  const allOrders = role === 'advisor' && req.user.allOrdersAccess;
+  const { id: myId } = req.user;
   const orderId = req.params.id.toUpperCase();
   const { items, reason } = req.body;
 
@@ -949,35 +1048,14 @@ router.put('/:id/items', async (req, res) => {
     if (!ITEM_EDITABLE_STATUSES.includes(order.status)) {
       await client.query('ROLLBACK');
       return res.status(409).json({
-        error: 'Solo se pueden modificar items antes de que el pedido entre a Alistamiento',
+        error: 'Solo se pueden modificar items mientras el pedido esta pendiente de aprobacion',
       });
     }
 
-    // Autorizacion por scope segun rol/clientRole
-    let authorized = false;
-    if (role === 'admin' || role === 'advisor') {
-      authorized = true;
-    } else if (role === 'client' && clientRole === 'creador_pedidos') {
-      authorized = order.client_id === myId;
-    } else if (role === 'client' && clientRole === 'supervisor') {
-      const { rows: cu } = await client.query(
-        `SELECT company_id, sucursal_id FROM users WHERE id = $1`, [order.client_id]
-      );
-      authorized = cu[0]?.company_id === companyId && cu[0]?.sucursal_id === sucursalId;
-    } else if (role === 'client' && clientRole === 'administrador_contrato') {
-      const { rows: cu } = await client.query(
-        `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
-      );
-      authorized = cu[0]?.company_id === companyId;
-    }
-    if (!authorized) {
+    const denial = await itemEditDenial(req, order, client);
+    if (denial) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'No tiene permiso para modificar items de este pedido' });
-    }
-
-    if (role === 'advisor' && order.advisor_id && order.advisor_id !== myId && !allOrders) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Pedido asignado a otro asesor' });
+      return res.status(denial.status).json({ error: denial.error });
     }
 
     // Snapshot actual (frozen prices: NO se cambia el unit_price aqui)
@@ -988,15 +1066,50 @@ router.put('/:id/items', async (req, res) => {
     const existingByProduct = new Map();
     for (const it of existing) existingByProduct.set(it.product_id, it);
 
-    // Solo se modifican/eliminan items existentes (no se agregan nuevos).
-    for (const pid of desiredByProduct.keys()) {
-      if (!existingByProduct.has(pid)) {
-        await client.query('ROLLBACK');
-        return res.status(422).json({ error: `productId ${pid} no pertenece al pedido` });
+    // Productos nuevos (no estaban en el pedido) -> se resuelven contra el
+    // catalogo del cliente con las mismas reglas que POST /orders.
+    const newProductIds = [...desiredByProduct.keys()].filter(pid => !existingByProduct.has(pid));
+    const resolvedNew = []; // { productId, productName, sku, unit, unitPrice, ivaRate, quantity }
+    if (newProductIds.length) {
+      const { contractProductIds, priceListChain, priceSelect, priceJoin } =
+        await orderPricingContext(order, client, 2);
+
+      for (const pid of newProductIds) {
+        if (contractProductIds && !contractProductIds.has(pid)) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: `El producto ${pid} esta fuera del contrato vigente de la empresa` });
+        }
+        const { rows: pr } = await client.query(
+          `SELECT p.id, p.name, p.sku, p.unit, p.active, p.iva_rate, c.active AS category_active,
+                  ${priceSelect} AS backend_price
+             FROM products p
+             JOIN categories c ON c.id = p.category_id
+             ${priceJoin}
+            WHERE p.id = $1`,
+          [pid, ...priceListChain]
+        );
+        const prod = pr[0];
+        if (!prod) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: `Producto no encontrado (id=${pid})` });
+        }
+        if (!prod.active || !prod.category_active) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: `El producto ${prod.name} no esta disponible en el catalogo` });
+        }
+        const price = Number(prod.backend_price);
+        if (!Number.isFinite(price) || price <= 0) {
+          await client.query('ROLLBACK');
+          return res.status(500).json({ error: `Precio no resoluble para el producto ${prod.name}` });
+        }
+        resolvedNew.push({
+          productId: prod.id, productName: prod.name, sku: prod.sku, unit: prod.unit,
+          unitPrice: price, ivaRate: Number(prod.iva_rate), quantity: desiredByProduct.get(pid),
+        });
       }
     }
 
-    // Calcular cambios (updates y removes)
+    // Calcular cambios (updates, removes y added)
     const changes = [];
 
     for (const it of existing) {
@@ -1015,13 +1128,21 @@ router.put('/:id/items', async (req, res) => {
       }
     }
 
+    for (const np of resolvedNew) {
+      changes.push({
+        action: 'added', productId: np.productId, productName: np.productName, sku: np.sku,
+        prevQuantity: null, newQuantity: np.quantity, prevUnitPrice: null, newUnitPrice: np.unitPrice,
+      });
+    }
+
     if (!changes.length) {
       await client.query('ROLLBACK');
       return res.status(422).json({ error: 'No hay cambios para guardar' });
     }
 
     // Validar que quede al menos un item en el pedido
-    const remainingItems = existing.filter(it => desiredByProduct.has(it.product_id)).length;
+    const remainingItems =
+      existing.filter(it => desiredByProduct.has(it.product_id)).length + resolvedNew.length;
     if (remainingItems === 0) {
       await client.query('ROLLBACK');
       return res.status(422).json({
@@ -1036,11 +1157,19 @@ router.put('/:id/items', async (req, res) => {
           `DELETE FROM order_items WHERE order_id = $1 AND product_id = $2`,
           [orderId, ch.productId]
         );
-      } else {
+      } else if (ch.action === 'updated') {
         await client.query(
           `UPDATE order_items SET quantity = $1
            WHERE order_id = $2 AND product_id = $3`,
           [ch.newQuantity, orderId, ch.productId]
+        );
+      } else {
+        // added: nuevo item con precio y tasa resueltos por el backend (snapshot)
+        const np = resolvedNew.find(n => n.productId === ch.productId);
+        await client.query(
+          `INSERT INTO order_items (order_id, product_id, product_name, sku, quantity, unit_price, unit, iva_rate)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [orderId, np.productId, np.productName, np.sku, np.quantity, np.unitPrice, np.unit, np.ivaRate]
         );
       }
 
@@ -1059,12 +1188,15 @@ router.put('/:id/items', async (req, res) => {
     }
 
     // Estado final de lineas -> recalcular total + discriminacion de IVA por tasa
-    const finalLines = existing
-      .filter(it => desiredByProduct.has(it.product_id))
-      .map(it => ({
-        lineTotal: Number(it.unit_price) * desiredByProduct.get(it.product_id),
-        ivaRate: Number(it.iva_rate),
-      }));
+    const finalLines = [
+      ...existing
+        .filter(it => desiredByProduct.has(it.product_id))
+        .map(it => ({
+          lineTotal: Number(it.unit_price) * desiredByProduct.get(it.product_id),
+          ivaRate: Number(it.iva_rate),
+        })),
+      ...resolvedNew.map(np => ({ lineTotal: np.unitPrice * np.quantity, ivaRate: np.ivaRate })),
+    ];
     const {
       total: newTotal, subtotal: newSubtotal, iva: newIva,
       iva5: newIva5, iva19: newIva19, exentoBase: newExento,
@@ -1081,7 +1213,9 @@ router.put('/:id/items', async (req, res) => {
     const summary = changes.map(c =>
       c.action === 'removed'
         ? `eliminado: ${c.productName}`
-        : `${c.productName}: ${c.prevQuantity} -> ${c.newQuantity}`
+        : c.action === 'added'
+          ? `agregado: ${c.productName} x${c.newQuantity}`
+          : `${c.productName}: ${c.prevQuantity} -> ${c.newQuantity}`
     ).join('; ');
     await client.query(
       `INSERT INTO order_comments (order_id, author_id, text)
@@ -1123,6 +1257,106 @@ router.put('/:id/items', async (req, res) => {
       changes,
       ...(warnings ? { warnings } : {}),
     });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    client.release();
+  }
+});
+
+// Estado desde el que se puede revocar una aprobacion: aprobado pero sin
+// iniciar Alistamiento.
+const REVOCABLE_STATUS = 'Validar disponibilidad';
+
+// POST /orders/:id/revoke-approval  { reason }
+// Revierte la aprobacion: 'Validar disponibilidad' -> 'Pendiente por aprobar'
+// para poder corregir el pedido. Autorizado para quien puede aprobarlo:
+// admin, supervisor (su sucursal) y administrador_contrato (toda su empresa).
+// Consistencia:
+//   - Lock de fila + validacion de estado dentro de la transaccion (dos
+//     revocaciones simultaneas -> la segunda recibe 409).
+//   - Se elimina el adjunto de orden de compra: queda sin efecto y se genera
+//     de nuevo (con los items corregidos) cuando el pedido se vuelva a aprobar.
+//   - Presupuesto y estadisticas no requieren ajuste: ya excluyen los pedidos
+//     "Pendiente por aprobar".
+// Trazabilidad: order_status_log (usuario, fecha, motivo) + comentario sistema.
+router.post('/:id/revoke-approval', async (req, res) => {
+  const { role, id: myId, clientRole, companyId, sucursalId } = req.user;
+  const orderId = req.params.id.toUpperCase();
+  const reason = String(req.body?.reason || '').trim();
+
+  if (!reason) {
+    return res.status(422).json({ error: 'Debes indicar el motivo de la revocacion' });
+  }
+  if (reason.length > 1000) {
+    return res.status(422).json({ error: 'reason no puede superar 1000 caracteres' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `SELECT o.*, uc.company_id AS client_company_id, uc.sucursal_id AS client_sucursal_id
+         FROM orders o
+         JOIN users uc ON uc.id = o.client_id
+        WHERE o.id = $1
+        FOR UPDATE OF o`,
+      [orderId]
+    );
+    const order = rows[0];
+    if (!order) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Pedido no encontrado' });
+    }
+
+    let authorized = false;
+    if (role === 'admin') {
+      authorized = true;
+    } else if (role === 'client' && clientRole === 'administrador_contrato') {
+      authorized = order.client_company_id === companyId;
+    } else if (role === 'client' && clientRole === 'supervisor') {
+      authorized = order.client_company_id === companyId && order.client_sucursal_id === sucursalId;
+    }
+    if (!authorized) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'No tiene permiso para revocar la aprobacion de este pedido' });
+    }
+
+    if (order.status !== REVOCABLE_STATUS) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: order.status === 'Pendiente por aprobar'
+          ? 'El pedido ya esta pendiente de aprobacion'
+          : 'Solo se puede revocar la aprobacion antes de que el pedido entre a Alistamiento',
+      });
+    }
+
+    const { rows: updated } = await client.query(
+      `UPDATE orders SET status = 'Pendiente por aprobar' WHERE id = $1 RETURNING *`,
+      [orderId]
+    );
+
+    await client.query(
+      `INSERT INTO order_status_log (order_id, from_status, to_status, changed_by, reason)
+       VALUES ($1, $2, 'Pendiente por aprobar', $3, $4)`,
+      [orderId, order.status, myId, `Aprobacion revocada: ${reason}`]
+    );
+
+    await client.query(
+      `DELETE FROM order_attachments WHERE order_id = $1 AND type = 'purchase_order'`,
+      [orderId]
+    );
+
+    await client.query(
+      `INSERT INTO order_comments (order_id, author_id, text) VALUES ($1, $2, $3)`,
+      [orderId, myId, `↩️ Aprobacion revocada. Motivo: ${reason}`]
+    );
+
+    await client.query('COMMIT');
+    return res.json(updated[0]);
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
     console.error(err);

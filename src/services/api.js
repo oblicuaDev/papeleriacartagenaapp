@@ -165,6 +165,9 @@ export const ordersApi = {
   create: (data)            => post('/orders', data),
   update: (id, data)        => put(`/orders/${id}`, data),
   updateItems: (id, data)   => put(`/orders/${id}/items`, data),
+  addableProducts: (id, search) =>
+    get(`/orders/${id}/addable-products?` + new URLSearchParams({ search })),
+  revokeApproval: (id, reason) => post(`/orders/${id}/revoke-approval`, { reason }),
   timeline: (id)            => get(`/orders/${id}/timeline`),
   addComment:    (oId, txt) => post(`/orders/${oId}/comments`, { text: txt }),
   removeComment: (oId, cId) => del(`/orders/${oId}/comments/${cId}`),

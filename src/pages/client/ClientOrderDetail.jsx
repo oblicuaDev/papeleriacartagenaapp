@@ -3,18 +3,22 @@ import { useEffect, useState } from 'react';
 import {
   ArrowLeft, Package, FileText, Paperclip, MessageSquare,
   File, FileText as FilePdf, ImageIcon, Download, User, Calendar, Truck,
-  FileDown, Sheet, XCircle, CheckCircle2,
+  FileDown, Sheet, XCircle, CheckCircle2, Undo2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import QuantityInput from '../../components/QuantityInput';
-import { RejectModal, ConfirmApproveModal } from '../../components/OrderApprovalModals';
+import { RejectModal, ConfirmApproveModal, RevokeApprovalModal } from '../../components/OrderApprovalModals';
+import AddOrderProductSearch from '../../components/AddOrderProductSearch';
 import OrderClaimsPanel from '../../components/OrderClaimsPanel';
 import { ordersApi } from '../../services/api';
 import { STATUS_STYLES, formatCOP, aggregateOrderIva, ivaRateLabel } from '../../data/mockData';
 
 // Un pedido solo se edita ANTES de su aprobación formal. Aprobado = cerrado.
 const ITEM_EDITABLE_STATUSES = ['Pendiente por aprobar', 'Pendiente'];
+
+// La aprobación se puede revocar mientras el pedido no entre a Alistamiento.
+const REVOCABLE_STATUS = 'Validar disponibilidad';
 
 // Solo se puede reclamar un pedido ya entregado.
 const CLAIM_ALLOWED_STATUS = 'Entregado';
@@ -80,12 +84,13 @@ export default function ClientOrderDetail() {
   // ── Aprobación ──────────────────────────────────────────────
   const clientRole = currentUser?.clientRole;
   const orderClient = order ? users.find(u => u.id === order.clientId) : null;
-  const canApprove = order && order.status === 'Pendiente por aprobar' && (
-    clientRole === 'administrador_contrato' ||
-    (clientRole === 'supervisor' && orderClient?.sucursalId === currentUser?.sucursalId)
-  );
+  const isApprover = clientRole === 'administrador_contrato' ||
+    (clientRole === 'supervisor' && orderClient?.sucursalId === currentUser?.sucursalId);
+  const canApprove = order && order.status === 'Pendiente por aprobar' && isApprover;
+  const canRevoke = order && order.status === REVOCABLE_STATUS && isApprover;
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [showReject, setShowReject] = useState(false);
+  const [showRevoke, setShowRevoke] = useState(false);
   const [approveError, setApproveError] = useState(null);
 
   async function doApprove() {
@@ -114,20 +119,37 @@ export default function ClientOrderDetail() {
     }
   }
 
-  // Quién aprobó/rechazó (del timeline) — para pedidos que ya salieron de "Pendiente por aprobar".
-  const [decision, setDecision] = useState(null); // { toStatus, actorName, at }
+  async function doRevoke(reason) {
+    setApproveError(null);
+    try {
+      await ordersApi.revokeApproval(order.id, reason);
+      setOrder(await ordersApi.get(order.id));
+      refreshOrders?.();
+    } catch (err) {
+      setApproveError(err?.message || 'No se pudo revocar la aprobación');
+    } finally {
+      setShowRevoke(false);
+    }
+  }
+
+  // Última decisión sobre la aprobación (del timeline): aprobado, rechazado
+  // o aprobación revocada.
+  const [decision, setDecision] = useState(null); // { kind, actorName, at }
   useEffect(() => {
-    if (!order || order.status === 'Pendiente por aprobar') { setDecision(null); return; }
+    if (!order) { setDecision(null); return; }
     let cancelled = false;
     ordersApi.timeline(order.id)
       .then((res) => {
         if (cancelled) return;
-        const ev = (res.events || []).find(
-          e => e.eventType === 'status' &&
-            e.payload?.fromStatus === 'Pendiente por aprobar' &&
-            ['Validar disponibilidad', 'Rechazado', 'Pendiente'].includes(e.payload?.toStatus)
-        );
-        setDecision(ev ? { toStatus: ev.payload.toStatus, actorName: ev.actorName, at: ev.occurredAt } : null);
+        const ev = (res.events || []).filter(e => e.eventType === 'status' && (
+          (e.payload?.fromStatus === 'Pendiente por aprobar' &&
+            ['Validar disponibilidad', 'Rechazado', 'Pendiente'].includes(e.payload?.toStatus)) ||
+          (e.payload?.fromStatus === REVOCABLE_STATUS && e.payload?.toStatus === 'Pendiente por aprobar')
+        )).pop();
+        if (!ev) { setDecision(null); return; }
+        const kind = ev.payload.toStatus === 'Rechazado' ? 'rejected'
+          : ev.payload.toStatus === 'Pendiente por aprobar' ? 'revoked' : 'approved';
+        setDecision({ kind, actorName: ev.actorName, at: ev.occurredAt });
       })
       .catch(() => setDecision(null));
     return () => { cancelled = true; };
@@ -186,7 +208,28 @@ export default function ClientOrderDetail() {
   }
 
   function toggleRemove(productId) {
-    setDraft((prev) => prev.map((it) => (it.productId === productId ? { ...it, removed: !it.removed } : it)));
+    setDraft((prev) =>
+      prev
+        .map((it) => (it.productId === productId ? { ...it, removed: !it.removed } : it))
+        // un producto recién agregado se quita del todo
+        .filter((it) => !(it.productId === productId && it.added && it.removed))
+    );
+  }
+
+  function addProduct(p) {
+    setDraft((prev) => {
+      const existing = prev.find((it) => it.productId === p.id);
+      // Si era un artículo del pedido marcado para eliminar, se restaura.
+      if (existing) return prev.map((it) => (it.productId === p.id ? { ...it, removed: false } : it));
+      return [
+        ...prev,
+        {
+          productId: p.id, productName: p.name, sku: p.sku, unit: p.unit,
+          unitPrice: Number(p.price) || 0, quantity: 1,
+          ivaRate: Number(p.ivaRate ?? 19), removed: false, added: true,
+        },
+      ];
+    });
   }
 
   const [downloading, setDownloading] = useState(null); // 'pdf' | 'xlsx' | null
@@ -211,6 +254,7 @@ export default function ClientOrderDetail() {
   const hasChanges = (() => {
     const orig = new Map((order?.items || []).map((it) => [it.productId, it]));
     return draft.some((it) => {
+      if (it.added) return true;
       const o = orig.get(it.productId);
       if (!o) return false;
       if (it.removed) return true;
@@ -316,6 +360,15 @@ export default function ClientOrderDetail() {
               </button>
             </>
           )}
+          {canRevoke && (
+            <button
+              onClick={() => setShowRevoke(true)}
+              className="flex items-center gap-2 px-4 py-2 border-2 border-amber-200 text-amber-700 rounded-lg text-sm font-semibold hover:bg-amber-50 transition"
+            >
+              <Undo2 className="w-4 h-4" />
+              Revocar aprobación
+            </button>
+          )}
           {order.status !== 'Pendiente por aprobar' && (
             <>
               <button
@@ -367,10 +420,10 @@ export default function ClientOrderDetail() {
                   </p>
                   {decision && (
                     <p className="flex items-center gap-1.5">
-                      {decision.toStatus === 'Rechazado'
-                        ? <XCircle className="w-3.5 h-3.5 text-red-500" />
-                        : <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />}
-                      {decision.toStatus === 'Rechazado' ? 'Rechazado por' : 'Aprobado por'}:{' '}
+                      {decision.kind === 'rejected' && <XCircle className="w-3.5 h-3.5 text-red-500" />}
+                      {decision.kind === 'revoked' && <Undo2 className="w-3.5 h-3.5 text-amber-600" />}
+                      {decision.kind === 'approved' && <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />}
+                      {{ rejected: 'Rechazado por', revoked: 'Aprobación revocada por', approved: 'Aprobado por' }[decision.kind]}:{' '}
                       <span className="font-medium text-gray-700">{decision.actorName || '—'}</span>
                       {decision.at && <span className="text-gray-400"> · {formatDateTime(decision.at)}</span>}
                     </p>
@@ -445,10 +498,11 @@ export default function ClientOrderDetail() {
                     </tr>
                   ))}
                   {editing && draft.map((item) => (
-                    <tr key={item.productId} className={item.removed ? 'bg-red-50' : 'hover:bg-gray-50'}>
+                    <tr key={item.productId} className={item.removed ? 'bg-red-50' : item.added ? 'bg-emerald-50' : 'hover:bg-gray-50'}>
                       <td className="px-5 py-3 text-xs font-mono text-blue-600 whitespace-nowrap">{item.sku || '—'}</td>
                       <td className={`px-5 py-3 text-sm font-medium ${item.removed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
                         {item.productName}
+                        {item.added && <span className="ml-2 text-[10px] font-semibold uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">nuevo</span>}
                       </td>
                       <td className="px-5 py-3 text-sm text-gray-500">{item.unit}</td>
                       <td className="px-5 py-3 text-sm text-gray-700 text-center">
@@ -471,7 +525,7 @@ export default function ClientOrderDetail() {
                             item.removed ? 'text-blue-700 hover:bg-blue-50' : 'text-red-600 hover:bg-red-50'
                           }`}
                         >
-                          {item.removed ? 'Restaurar' : 'Eliminar'}
+                          {item.removed ? 'Restaurar' : item.added ? 'Quitar' : 'Eliminar'}
                         </button>
                       </td>
                     </tr>
@@ -507,6 +561,11 @@ export default function ClientOrderDetail() {
 
             {editing && (
               <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 space-y-3">
+                <AddOrderProductSearch
+                  orderId={order.id}
+                  inOrderIds={new Set(draft.filter((it) => !it.removed).map((it) => it.productId))}
+                  onAdd={addProduct}
+                />
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">
                     Motivo de la modificación <span className="text-red-500">*</span>
@@ -676,6 +735,13 @@ export default function ClientOrderDetail() {
           order={order}
           onConfirm={doReject}
           onCancel={() => setShowReject(false)}
+        />
+      )}
+      {showRevoke && (
+        <RevokeApprovalModal
+          order={order}
+          onConfirm={doRevoke}
+          onCancel={() => setShowRevoke(false)}
         />
       )}
     </div>

@@ -391,7 +391,7 @@ CREATE TABLE IF NOT EXISTS order_item_changes (
     reason          TEXT           NOT NULL,
     changed_by      INTEGER        REFERENCES users(id) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-    CONSTRAINT chk_oic_action CHECK (action IN ('updated', 'removed'))
+    CONSTRAINT chk_oic_action CHECK (action IN ('updated', 'removed', 'added'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_oic_order      ON order_item_changes(order_id, created_at);
@@ -623,6 +623,14 @@ BEGIN
         GRANT USAGE, SELECT ON SEQUENCE claim_items_id_seq TO papeleria_user;
     END IF;
 END $$;
+
+-- ----------------------------------------------------------
+-- 23. Agregar productos a un pedido pendiente (migración 021):
+--     order_item_changes.action gana 'added'.
+-- ----------------------------------------------------------
+ALTER TABLE order_item_changes DROP CONSTRAINT IF EXISTS chk_oic_action;
+ALTER TABLE order_item_changes ADD  CONSTRAINT chk_oic_action
+    CHECK (action IN ('updated', 'removed', 'added'));
 
 -- ----------------------------------------------------------
 -- Función auxiliar: generar ID de pedido (ORD-00001)

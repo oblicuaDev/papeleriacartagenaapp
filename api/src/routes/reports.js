@@ -111,6 +111,7 @@ const DATASETS = {
       order_date:     { header: 'Fecha pedido', sql: `TO_CHAR(o.created_at, 'YYYY-MM-DD')` },
       company:        { header: 'Empresa',     sql: 'c.name' },
       sucursal:       { header: 'Sucursal',    sql: 's.name' },
+      client:         { header: 'Cliente',     sql: 'uc.name' },
       sku:            { header: 'SKU',         sql: 'oi.sku' },
       product_name:   { header: 'Producto',    sql: 'oi.product_name' },
       category:       { header: 'Categoría',   sql: 'cat.name' },

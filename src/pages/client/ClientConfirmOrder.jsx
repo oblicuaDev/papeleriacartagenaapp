@@ -1,22 +1,53 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, Trash2, CheckCircle, ArrowLeft, FileText, Save } from 'lucide-react';
+import { ShoppingCart, Trash2, CheckCircle, ArrowLeft, FileText, Save, Building2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import QuantityInput from '../../components/QuantityInput';
 import { formatCOP } from '../../data/mockData';
+import { catalogApi } from '../../services/api';
 
 export default function ClientConfirmOrder() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   const {
     cart, cartTotal, cartSubtotal, cartIva, cartIva5, cartIva19, cartExentoBase,
-    updateCartItem, removeFromCart, submitOrder, refreshProducts,
+    updateCartItem, removeFromCart, submitOrder, refreshProducts, repriceCart, companies,
   } = useApp();
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
+
+  // administrador_contrato puede hacer el pedido a nombre de cualquier sucursal
+  // de su empresa: el pedido queda en esa sucursal (precios, asesor y
+  // aprobacion) y el administrador figura como autor.
+  const isAdminContrato = currentUser?.clientRole === 'administrador_contrato';
+  const sucursales = isAdminContrato
+    ? (companies.find(c => c.id === currentUser?.companyId)?.sucursales || []).filter(s => s.active !== false)
+    : [];
+  const [sucursalId, setSucursalId] = useState(String(currentUser?.sucursalId ?? ''));
+  const [repricing, setRepricing] = useState(false);
+
+  // Precios del carrito segun la sucursal elegida (el backend valida contra
+  // esa misma lista al crear el pedido).
+  const cartIdsKey = cart.map(i => i.productId).sort((a, b) => a - b).join(',');
+  const loadSucursalPrices = useCallback(async () => {
+    if (!isAdminContrato || !sucursalId || !cartIdsKey) return;
+    setRepricing(true);
+    try {
+      const res = await catalogApi.list({ sucursalId, ids: cartIdsKey, limit: 1000 });
+      const priceById = {};
+      for (const p of res?.data || []) priceById[p.id] = Number(p.price);
+      repriceCart(priceById);
+    } catch (err) {
+      setErrorMsg(err?.message || 'No se pudieron cargar los precios de la sucursal');
+    } finally {
+      setRepricing(false);
+    }
+  }, [isAdminContrato, sucursalId, cartIdsKey]);
+
+  useEffect(() => { loadSucursalPrices(); }, [loadSucursalPrices]);
 
   // "Guardar borrador" = dejar el carrito como está y volver al catálogo.
   // El carrito se conserva solo (localStorage), no se crea ningún pedido.
@@ -28,12 +59,16 @@ export default function ClientConfirmOrder() {
     setErrorMsg(null);
     setSubmitting(true);
     try {
-      const orderId = await submitOrder(currentUser.id, null, notes);
+      const orderId = await submitOrder(
+        currentUser.id, null, notes,
+        isAdminContrato && sucursalId ? Number(sucursalId) : undefined,
+      );
       setSubmitted(orderId);
     } catch (err) {
       // Backend rechazo el pedido. Distinguimos mismatches de precio (409 con detail).
       if (err?.status === 409 && Array.isArray(err?.data?.mismatches)) {
         await refreshProducts?.();
+        await loadSucursalPrices();
         const lines = err.data.mismatches.map(m =>
           `• ${m.productName}: pediste $${m.clientPrice}, ahora cuesta $${m.backendPrice}`
         ).join('\n');
@@ -112,6 +147,31 @@ export default function ClientConfirmOrder() {
           <p className="text-sm text-gray-500 mt-0.5">Revisa tu pedido antes de enviarlo</p>
         </div>
       </div>
+
+      {/* Sucursal destino — solo administrador_contrato */}
+      {isAdminContrato && sucursales.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+          <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
+            <Building2 className="w-4 h-4 text-blue-700" />
+            Sucursal del pedido
+          </label>
+          <select
+            value={sucursalId}
+            onChange={e => { setErrorMsg(null); setSucursalId(e.target.value); }}
+            disabled={submitting || repricing}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          >
+            {sucursales.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name}{s.id === currentUser?.sucursalId ? ' (mi sucursal)' : ''}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-400 mt-2">
+            El pedido queda a nombre de esta sucursal (precios, asesor y aprobación) y tú como autor.
+          </p>
+        </div>
+      )}
 
       {/* Items */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -212,7 +272,7 @@ export default function ClientConfirmOrder() {
         </button>
         <button
           onClick={handleSubmit}
-          disabled={submitting}
+          disabled={submitting || repricing}
           className="flex-1 py-4 bg-blue-700 hover:bg-blue-800 disabled:bg-blue-300 text-white rounded-xl text-base font-bold transition shadow-sm"
         >
           {submitting ? 'Enviando...' : 'Enviar mi pedido'}

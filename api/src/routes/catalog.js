@@ -1,22 +1,27 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { resolvePriceListChain, priceSqlFragmentChain } from '../lib/pricing.js';
+import { resolvePriceListChain, priceSqlFragmentChain, resolveTargetSucursal } from '../lib/pricing.js';
 import { resolveActiveContractProductIds } from '../lib/contracts.js';
 
 const router = Router();
 router.use(requireAuth, requireRole('client'));
 
 // GET /catalog
+//   sucursalId (opcional, solo administrador_contrato): precios de esa sucursal
+//   ids (opcional, "1,2,3"): solo esos productos (recotizar el carrito)
 router.get('/', async (req, res) => {
   const { id: userId, companyId } = req.user;
-  const { categoryId, granCategoriaId, search, page = 1, limit = 20 } = req.query;
+  const { categoryId, granCategoriaId, search, ids, page = 1, limit = 20 } = req.query;
   const pageNum = Math.max(1, parseInt(page));
   const limitNum = Math.min(1000, Math.max(1, parseInt(limit)));
   const offset = (pageNum - 1) * limitNum;
 
   try {
-    const chain = await resolvePriceListChain({ companyId, userId });
+    const target = await resolveTargetSucursal(req.user, req.query.sucursalId);
+    if (target.error) return res.status(target.status).json({ error: target.error });
+
+    const chain = await resolvePriceListChain({ companyId, userId, sucursalId: target.sucursalId });
     const priceListId = chain[0] || null;
 
     let priceListName = null;
@@ -45,6 +50,11 @@ router.get('/', async (req, res) => {
     if (categoryId) conditions.push(`p.category_id = $${params.push(parseInt(categoryId))}`);
 
     if (granCategoriaId) conditions.push(`c.gran_categoria_id = $${params.push(parseInt(granCategoriaId))}`);
+
+    if (ids) {
+      const idList = String(ids).split(',').map(Number).filter(n => Number.isInteger(n) && n > 0);
+      conditions.push(`p.id = ANY($${params.push(idList)}::int[])`);
+    }
 
     if (search) {
       const s = '%' + search + '%';

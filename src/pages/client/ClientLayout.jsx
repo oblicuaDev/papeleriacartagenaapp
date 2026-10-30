@@ -18,19 +18,18 @@ export default function ClientLayout() {
   // Supervisor NO administra empresas/sucursales/usuarios — solo ve sus pedidos.
   const canManage      = isAdminEmpresa;
 
-  // Supervisor ve aprobaciones de su sucursal; administrador_contrato de toda la empresa.
+  // Supervisor ve aprobaciones de su sucursal (la del pedido); administrador_contrato de toda la empresa.
   const canApprove = isSupervisor || isAdminContrato;
-  const approvalScopeIds = canApprove
+  const approvalScopeIds = isAdminContrato
     ? users
-        .filter(u =>
-          u.role === 'client' &&
-          u.companyId === currentUser.companyId &&
-          (isAdminContrato || u.sucursalId === currentUser.sucursalId)
-        )
+        .filter(u => u.role === 'client' && u.companyId === currentUser.companyId)
         .map(u => u.id)
     : [];
   const pendingApprovalCount = canApprove
-    ? orders.filter(o => o.status === 'Pendiente por aprobar' && approvalScopeIds.includes(o.clientId)).length
+    ? orders.filter(o =>
+        o.status === 'Pendiente por aprobar' &&
+        (isSupervisor ? o.sucursalId === currentUser.sucursalId : approvalScopeIds.includes(o.clientId))
+      ).length
     : 0;
   const navigate = useNavigate();
   const [cartOpen, setCartOpen] = useState(false);

@@ -83,9 +83,8 @@ export default function ClientOrderDetail() {
 
   // ── Aprobación ──────────────────────────────────────────────
   const clientRole = currentUser?.clientRole;
-  const orderClient = order ? users.find(u => u.id === order.clientId) : null;
   const isApprover = clientRole === 'administrador_contrato' ||
-    (clientRole === 'supervisor' && orderClient?.sucursalId === currentUser?.sucursalId);
+    (clientRole === 'supervisor' && order?.sucursalId === currentUser?.sucursalId);
   const canApprove = order && order.status === 'Pendiente por aprobar' && isApprover;
   const canRevoke = order && order.status === REVOCABLE_STATUS && isApprover;
   const [confirmApprove, setConfirmApprove] = useState(false);

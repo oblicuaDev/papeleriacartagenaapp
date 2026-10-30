@@ -72,7 +72,7 @@ function scopeCondition(user, params) {
   if (role === 'client') {
     if (clientRole === 'creador_pedidos') return `o.client_id = $${params.push(id)}`;
     if (clientRole === 'supervisor') {
-      return `(uc.company_id = $${params.push(companyId)} AND uc.sucursal_id = $${params.push(sucursalId ?? null)})`;
+      return `(uc.company_id = $${params.push(companyId)} AND o.sucursal_id = $${params.push(sucursalId ?? null)})`;
     }
     return `uc.company_id = $${params.push(companyId)}`; // admin_empresa / administrador_contrato
   }

@@ -56,7 +56,7 @@ const DATASETS = {
     from: `FROM orders o
       JOIN users uc          ON uc.id = o.client_id
       LEFT JOIN companies c  ON c.id  = uc.company_id
-      LEFT JOIN sucursales s ON s.id  = uc.sucursal_id
+      LEFT JOIN sucursales s ON s.id  = o.sucursal_id
       LEFT JOIN users ua     ON ua.id = o.advisor_id
       LEFT JOIN users ud     ON ud.id = o.delivery_id`,
     dateColumn: 'o.created_at',
@@ -86,7 +86,7 @@ const DATASETS = {
       status:         eqText('o.status'),
       advisorId:      eqInt('o.advisor_id'),
       companyId:      eqInt('uc.company_id'),
-      sucursalId:     eqInt('uc.sucursal_id'),
+      sucursalId:     eqInt('o.sucursal_id'),
       categoryId:     existsCategory,
       granCategoriaId: existsGranCategoria,
     },
@@ -99,7 +99,7 @@ const DATASETS = {
       JOIN orders o           ON o.id  = oi.order_id
       JOIN users uc           ON uc.id = o.client_id
       LEFT JOIN companies c   ON c.id  = uc.company_id
-      LEFT JOIN sucursales s  ON s.id  = uc.sucursal_id
+      LEFT JOIN sucursales s  ON s.id  = o.sucursal_id
       LEFT JOIN products p    ON p.id  = oi.product_id
       LEFT JOIN categories cat ON cat.id = p.category_id
       LEFT JOIN gran_categorias gc ON gc.id = cat.gran_categoria_id`,
@@ -125,7 +125,7 @@ const DATASETS = {
       status:         eqText('o.status'),
       advisorId:      eqInt('o.advisor_id'),
       companyId:      eqInt('uc.company_id'),
-      sucursalId:     eqInt('uc.sucursal_id'),
+      sucursalId:     eqInt('o.sucursal_id'),
       categoryId:     eqInt('p.category_id'),
       granCategoriaId: eqInt('cat.gran_categoria_id'),
     },

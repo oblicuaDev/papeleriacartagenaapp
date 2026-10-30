@@ -198,7 +198,8 @@ UNIQUE `(product_id, price_list_id)` — un precio por producto por lista.
 | Columna       | Tipo           | Descripción                                               |
 |---------------|----------------|-----------------------------------------------------------|
 | `id`          | VARCHAR(20) PK | ID generado: `ORD-00001`, `ORD-00002`, ...               |
-| `client_id`   | INTEGER FK     | Usuario cliente que creó el pedido                        |
+| `client_id`   | INTEGER FK     | Usuario cliente que creó el pedido (autor)                |
+| `sucursal_id` | INTEGER FK     | Sucursal a nombre de la cual queda el pedido. Normalmente la del autor; el `administrador_contrato` puede elegir otra de su empresa. Define precios, asesor, supervisor que aprueba, PDF, informes y estadísticas por sucursal |
 | `advisor_id`  | INTEGER FK     | Asesor asignado (puede ser NULL)                          |
 | `delivery_id` | INTEGER FK     | Repartidor asignado (puede ser NULL)                      |
 | `delivered_by`| INTEGER FK     | Usuario que marcó como entregado                          |
@@ -283,6 +284,7 @@ Los índices clave para performance de consultas:
 | `idx_users_role`                | `users(role)` — filtros por rol         |
 | `idx_users_company`             | `users(company_id)`                     |
 | `idx_orders_client`             | `orders(client_id)`                     |
+| `idx_orders_sucursal`           | `orders(sucursal_id)`                   |
 | `idx_orders_status`             | `orders(status)` — filtros de estado    |
 | `idx_orders_created_at`         | `orders(created_at DESC)` — listados    |
 | `idx_osl_order`                 | `order_status_log(order_id, created_at)`|
@@ -321,7 +323,8 @@ Las migraciones están en `infra/migrations/` numeradas secuencialmente:
 | `011_order_item_changes.sql`                   | Cambios en ítems de pedido post-creación       |
 | `012` – `020`                                  | Ver encabezado de cada archivo (catálogo, IVA por producto, contratos, reclamos, etc.) |
 | `021_order_item_added.sql`                     | `order_item_changes.action` admite `added` (agregar productos a un pedido pendiente) |
+| `022_order_sucursal.sql`                       | `orders.sucursal_id` (sucursal del pedido) + backfill desde la sucursal del creador |
 
-> Solo `infra/migrate.sql` se ejecuta en dev y prod: cada migración nueva debe fusionarse ahí (la 021 está en la sección 23).
+> Solo `infra/migrate.sql` se ejecuta en dev y prod: cada migración nueva debe fusionarse ahí (la 021 está en la sección 23, la 022 en la 24).
 
 El archivo `infra/migrate.sql` contiene el schema completo consolidado (todas las migraciones aplicadas).

@@ -17,8 +17,8 @@ export default function ClientApproveOrders() {
     .filter((o) => o.status === "Pendiente por aprobar")
     .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 
-  function getClientName(clientId) {
-    return users.find((u) => u.id === clientId)?.name || "—";
+  function getClientName(order) {
+    return users.find((u) => u.id === order.clientId)?.name || order.clientName || "—";
   }
 
   async function confirmApprove() {
@@ -73,7 +73,7 @@ export default function ClientApproveOrders() {
       ) : (
         <div className="space-y-3">
           {pendingOrders.map((order) => {
-            const clientName = getClientName(order.clientId);
+            const clientName = getClientName(order);
             const itemCount = (order.items || []).reduce((s, i) => s + i.quantity, 0);
             return (
               <div

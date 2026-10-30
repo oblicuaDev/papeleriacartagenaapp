@@ -22,7 +22,7 @@ function buildScopeFilter(req) {
 
   if (role === 'admin') {
     if (qCompanyId) conds.push(`uc.company_id = $${params.push(parseInt(qCompanyId))}`);
-    if (qSucursalId) conds.push(`uc.sucursal_id = $${params.push(parseInt(qSucursalId))}`);
+    if (qSucursalId) conds.push(`o.sucursal_id = $${params.push(parseInt(qSucursalId))}`);
   } else if (role === 'advisor') {
     conds.push(`o.advisor_id = $${params.push(id)}`);
   } else if (role === 'client' && clientRole === 'creador_pedidos') {
@@ -30,11 +30,11 @@ function buildScopeFilter(req) {
   } else if (role === 'client' && clientRole === 'supervisor') {
     // Supervisor solo ve su sucursal
     conds.push(`uc.company_id = $${params.push(companyId)}`);
-    conds.push(`uc.sucursal_id = $${params.push(sucursalId ?? null)}`);
+    conds.push(`o.sucursal_id = $${params.push(sucursalId ?? null)}`);
   } else if (role === 'client' && (clientRole === 'admin_empresa' || clientRole === 'administrador_contrato')) {
     // admin_empresa/administrador_contrato ven toda su empresa, opcionalmente filtrado por sucursal
     conds.push(`uc.company_id = $${params.push(companyId)}`);
-    if (qSucursalId) conds.push(`uc.sucursal_id = $${params.push(parseInt(qSucursalId))}`);
+    if (qSucursalId) conds.push(`o.sucursal_id = $${params.push(parseInt(qSucursalId))}`);
   } else {
     const e = new Error('No autorizado');
     e.status = 403;
@@ -319,14 +319,14 @@ router.get('/client', requireRole('client'), async (req, res) => {
   let params;
   if (isCompanyWide) {
     if (qSucursalId) {
-      where  = `uc.company_id = $1 AND uc.sucursal_id = $2`;
+      where  = `uc.company_id = $1 AND o.sucursal_id = $2`;
       params = [companyId, parseInt(qSucursalId)];
     } else {
       where  = `uc.company_id = $1`;
       params = [companyId];
     }
   } else if (isSupervisor) {
-    where  = `uc.company_id = $1 AND uc.sucursal_id = $2`;
+    where  = `uc.company_id = $1 AND o.sucursal_id = $2`;
     params = [companyId, sucursalId ?? null];
   } else {
     where  = `o.client_id = $1`;
@@ -530,7 +530,7 @@ router.get('/orders/export', async (req, res) => {
          FROM orders o
          JOIN users uc           ON uc.id = o.client_id
          LEFT JOIN companies c   ON c.id  = uc.company_id
-         LEFT JOIN sucursales s  ON s.id  = uc.sucursal_id
+         LEFT JOIN sucursales s  ON s.id  = o.sucursal_id
          LEFT JOIN users ua      ON ua.id = o.advisor_id
        ${where}
        ORDER BY o.created_at DESC

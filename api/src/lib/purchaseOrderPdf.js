@@ -59,7 +59,7 @@ export async function loadOrderContext(orderId, db = pool) {
        JOIN users uc           ON uc.id = o.client_id
        LEFT JOIN users ua      ON ua.id = o.advisor_id
        LEFT JOIN companies c   ON c.id  = uc.company_id
-       LEFT JOIN sucursales s  ON s.id  = uc.sucursal_id
+       LEFT JOIN sucursales s  ON s.id  = o.sucursal_id
       WHERE o.id = $1`,
     [orderId]
   );

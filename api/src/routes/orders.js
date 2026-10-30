@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { priceSqlFragmentChain, resolveOrderRouting } from '../lib/pricing.js';
+import { priceSqlFragmentChain, resolveOrderRouting, resolveTargetSucursal } from '../lib/pricing.js';
 import { ensurePurchaseOrderPdf, loadOrderContext, renderPdfBuffer } from '../lib/purchaseOrderPdf.js';
 import { buildOrderDetailXlsx } from '../lib/orderExport.js';
 import { aggregateOrderIva } from '../lib/iva.js';
@@ -72,14 +72,12 @@ router.get('/', async (req, res) => {
   } else if (role === 'client' && clientRole === 'creador_pedidos') {
     conditions.push(`o.client_id = $${params.push(myId)}`);
   } else if (role === 'client' && clientRole === 'supervisor') {
-    // PHASE 3: supervisor solo ve pedidos de su sucursal
+    // PHASE 3: supervisor solo ve pedidos de su sucursal (la del pedido, que
+    // puede haber creado un administrador_contrato de otra sucursal)
     conditions.push(
-      `o.client_id IN (
-         SELECT u.id FROM users u
-         WHERE u.company_id = $${params.push(companyId)}
-           AND u.sucursal_id = $${params.push(req.user.sucursalId ?? null)}
-       )`
+      `o.client_id IN (SELECT id FROM users WHERE company_id = $${params.push(companyId)})`
     );
+    conditions.push(`o.sucursal_id = $${params.push(req.user.sucursalId ?? null)}`);
   } else if (role === 'client' && (clientRole === 'admin_empresa' || clientRole === 'administrador_contrato')) {
     // PHASE 3: admin_empresa/administrador_contrato ven pedidos de TODAS las sucursales de su empresa
     conditions.push(
@@ -161,13 +159,13 @@ async function canViewOrder(req, order) {
   }
   if (role === 'client') {
     const { rows } = await pool.query(
-      `SELECT company_id, sucursal_id FROM users WHERE id = $1`, [order.client_id]
+      `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
     );
     if (!rows[0] || rows[0].company_id !== companyId) return false;
-    // PHASE 3: supervisor solo ve pedidos de su sucursal;
+    // PHASE 3: supervisor solo ve pedidos de su sucursal (orders.sucursal_id);
     // admin_empresa y creador_pedidos ven toda la empresa.
     if (clientRole === 'supervisor') {
-      return rows[0].sucursal_id === sucursalId;
+      return order.sucursal_id === sucursalId;
     }
     return true;
   }
@@ -182,7 +180,7 @@ export async function purchaseOrderPdfHandler(req, res) {
   const orderId = req.params.id.toUpperCase();
   try {
     const { rows: head } = await pool.query(
-      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
+      `SELECT id, client_id, sucursal_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
       [orderId]
     );
     if (!head[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -209,7 +207,7 @@ router.get('/:id/export.xlsx', async (req, res) => {
   const orderId = req.params.id.toUpperCase();
   try {
     const { rows: head } = await pool.query(
-      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
+      `SELECT id, client_id, sucursal_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
       [orderId]
     );
     if (!head[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -236,7 +234,7 @@ router.get('/:id/pedido.pdf', async (req, res) => {
   const orderId = req.params.id.toUpperCase();
   try {
     const { rows: head } = await pool.query(
-      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
+      `SELECT id, client_id, sucursal_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
       [orderId]
     );
     if (!head[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -261,7 +259,7 @@ router.get('/:id/pedido.xlsx', async (req, res) => {
   const orderId = req.params.id.toUpperCase();
   try {
     const { rows: head } = await pool.query(
-      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
+      `SELECT id, client_id, sucursal_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
       [orderId]
     );
     if (!head[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -288,7 +286,7 @@ router.get('/:id/timeline', async (req, res) => {
 
   try {
     const { rows: orderRows } = await pool.query(
-      `SELECT id, client_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
+      `SELECT id, client_id, sucursal_id, advisor_id, delivery_id, status FROM orders WHERE id = $1`,
       [orderId]
     );
     if (!orderRows[0]) return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -453,6 +451,9 @@ router.get('/:id', async (req, res) => {
 //   - Resuelve precio BACKEND (lib pricing) y lo persiste como frozen en order_items.unit_price
 //   - Si el cliente envia item.unitPrice, valida que coincida con el backend (anti-tamper / cache stale)
 //   - Cliente NUNCA dicta el precio almacenado
+//   - sucursalId (opcional, solo administrador_contrato): el pedido queda a
+//     nombre de esa sucursal (precios, asesor, supervisor que aprueba) y el
+//     administrador figura como autor (client_id).
 router.post('/', requireRole('client'), async (req, res) => {
   const { id: clientId, clientRole, companyId } = req.user;
 
@@ -509,13 +510,25 @@ router.post('/', requireRole('client'), async (req, res) => {
   // al asesor ni cuenta para el presupuesto del contrato.
   const initialStatus = 'Pendiente por aprobar';
 
+  let targetSucursalId;
+  try {
+    const target = await resolveTargetSucursal(req.user, req.body.sucursalId);
+    if (target.error) return res.status(target.status).json({ error: target.error });
+    targetSucursalId = target.sucursalId;
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     // Routing del pedido + cadena de fallback de listas
-    const { priceListId: orderPriceListId, priceListChain, advisorId: orderAdvisorId } =
-      await resolveOrderRouting(clientId, client);
+    const {
+      priceListId: orderPriceListId, priceListChain,
+      advisorId: orderAdvisorId, sucursalId: orderSucursalId,
+    } = await resolveOrderRouting(clientId, client, targetSucursalId);
 
     // Params para la query de precios: $1 = productId, $2..$N = chain
     const listIdParams = priceListChain.map((_, i) => `$${i + 2}`);
@@ -607,9 +620,9 @@ router.post('/', requireRole('client'), async (req, res) => {
     // TODO: pre-asignar repartidor automaticamente cuando se implementen
     // las reglas de asignacion (round-robin, branches.delivery_id, carga, etc).
     await client.query(
-      `INSERT INTO orders (id, client_id, advisor_id, status, notes, total, subtotal, iva, iva_5, iva_19, iva_exento_base)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [newId, clientId, orderAdvisorId, initialStatus, notes || null, total, subtotal, iva, iva5, iva19, exentoBase]
+      `INSERT INTO orders (id, client_id, sucursal_id, advisor_id, status, notes, total, subtotal, iva, iva_5, iva_19, iva_exento_base)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [newId, clientId, orderSucursalId, orderAdvisorId, initialStatus, notes || null, total, subtotal, iva, iva5, iva19, exentoBase]
     );
 
     // Insertar items (snapshot frozen)
@@ -644,6 +657,7 @@ router.post('/', requireRole('client'), async (req, res) => {
       ivaExentoBase: exentoBase,
       priceListId: orderPriceListId,
       advisorId:   orderAdvisorId,
+      sucursalId:  orderSucursalId,
       createdAt:   new Date().toISOString(),
     });
   } catch (err) {
@@ -713,10 +727,7 @@ router.put('/:id', async (req, res) => {
           return res.status(403).json({ error: 'No autorizado para aprobar pedidos de otra empresa' });
         }
         // PHASE 3: supervisor solo aprueba pedidos de su sucursal
-        const { rows: clientUser } = await client.query(
-          `SELECT sucursal_id FROM users WHERE id = $1`, [order.client_id]
-        );
-        if (clientUser[0]?.sucursal_id !== sucursalId) {
+        if (order.sucursal_id !== sucursalId) {
           await client.query('ROLLBACK');
           return res.status(403).json({ error: 'Pedido pertenece a otra sucursal' });
         }
@@ -907,9 +918,9 @@ async function itemEditDenial(req, order, db) {
     authorized = order.client_id === myId;
   } else if (role === 'client' && clientRole === 'supervisor') {
     const { rows: cu } = await db.query(
-      `SELECT company_id, sucursal_id FROM users WHERE id = $1`, [order.client_id]
+      `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
     );
-    authorized = cu[0]?.company_id === companyId && cu[0]?.sucursal_id === sucursalId;
+    authorized = cu[0]?.company_id === companyId && order.sucursal_id === sucursalId;
   } else if (role === 'client' && clientRole === 'administrador_contrato') {
     const { rows: cu } = await db.query(
       `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
@@ -926,13 +937,14 @@ async function itemEditDenial(req, order, db) {
 }
 
 // Contexto de precios del CLIENTE del pedido (no de quien edita): misma
-// cadena de listas y mismo contrato vigente que aplico POST /orders.
+// cadena de listas (segun la sucursal del pedido) y mismo contrato vigente
+// que aplico POST /orders.
 async function orderPricingContext(order, db, firstParamIndex) {
   const { rows: cliRows } = await db.query(
     `SELECT company_id FROM users WHERE id = $1`, [order.client_id]
   );
   const contractProductIds = await resolveActiveContractProductIds(cliRows[0]?.company_id ?? null, db);
-  const { priceListChain } = await resolveOrderRouting(order.client_id, db);
+  const { priceListChain } = await resolveOrderRouting(order.client_id, db, order.sucursal_id);
   const listIdParams = priceListChain.map((_, i) => `$${i + firstParamIndex}`);
   const { select: priceSelect, join: priceJoin } = priceSqlFragmentChain({ alias: 'p', listIdParams });
   return { contractProductIds, priceListChain, priceSelect, priceJoin };
@@ -1299,7 +1311,7 @@ router.post('/:id/revoke-approval', async (req, res) => {
     await client.query('BEGIN');
 
     const { rows } = await client.query(
-      `SELECT o.*, uc.company_id AS client_company_id, uc.sucursal_id AS client_sucursal_id
+      `SELECT o.*, uc.company_id AS client_company_id
          FROM orders o
          JOIN users uc ON uc.id = o.client_id
         WHERE o.id = $1
@@ -1318,7 +1330,7 @@ router.post('/:id/revoke-approval', async (req, res) => {
     } else if (role === 'client' && clientRole === 'administrador_contrato') {
       authorized = order.client_company_id === companyId;
     } else if (role === 'client' && clientRole === 'supervisor') {
-      authorized = order.client_company_id === companyId && order.client_sucursal_id === sucursalId;
+      authorized = order.client_company_id === companyId && order.sucursal_id === sucursalId;
     }
     if (!authorized) {
       await client.query('ROLLBACK');

@@ -112,12 +112,16 @@ export default function ClientOrders() {
 
   const myOrders = useMemo(() => {
     return [...orders]
-      .filter(o => visibleClientIds.includes(o.clientId))
+      // Supervisor: por la sucursal del pedido (puede haberlo creado un
+      // administrador_contrato de otra sucursal a nombre de la suya).
+      .filter(o => isSupervisor
+        ? o.sucursalId === currentUser?.sucursalId
+        : visibleClientIds.includes(o.clientId))
       // El creador_pedidos si ve sus "Pendiente por aprobar": es la unica forma
       // que tiene de saber que su pedido ya quedo registrado y evitar duplicarlo.
       .filter(o => isCreador || !HIDDEN_STATUSES.includes(o.status))
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  }, [orders, visibleClientIds, isCreador]);
+  }, [orders, visibleClientIds, isCreador, isSupervisor, currentUser?.sucursalId]);
 
   const visibleTabs = useMemo(
     () => ORDER_TABS.filter(t => !t.creatorOnly || isCreador),
@@ -137,14 +141,11 @@ export default function ClientOrders() {
       if (q && !String(o.id).toLowerCase().includes(q)) return false;
       if (creatorId && o.clientId !== Number(creatorId)) return false;
       if (statusFilter && o.status !== statusFilter) return false;
-      if (sucursalId && isCompanyWide) {
-        const u = userById[o.clientId];
-        if (!u || u.sucursalId !== Number(sucursalId)) return false;
-      }
+      if (sucursalId && isCompanyWide && o.sucursalId !== Number(sucursalId)) return false;
       if (!inDateRange(o.createdAt)) return false;
       return true;
     });
-  }, [myOrders, tab, creatorId, statusFilter, sucursalId, orderIdQuery, dateFrom, dateTo, userById, isCompanyWide]);
+  }, [myOrders, tab, creatorId, statusFilter, sucursalId, orderIdQuery, dateFrom, dateTo, isCompanyWide]);
 
   function tabCount(tabValue) {
     return myOrders.filter(o => {
@@ -243,8 +244,10 @@ export default function ClientOrders() {
     }
   }
 
-  function getClientName(id) {
-    return userById[id]?.name || '—';
+  // El supervisor no recibe usuarios de otras sucursales: si el autor es un
+  // administrador_contrato, usamos el nombre que trae el pedido.
+  function getClientName(order) {
+    return userById[order.clientId]?.name || order.clientName || '—';
   }
 
   const showCreatorColumn = !isCreador;
@@ -389,7 +392,7 @@ export default function ClientOrders() {
                   >
                     <td className="px-5 py-4 text-sm font-mono font-medium text-blue-700">{order.id}</td>
                     {showCreatorColumn && (
-                      <td className="px-5 py-4 text-sm text-gray-600">{getClientName(order.clientId)}</td>
+                      <td className="px-5 py-4 text-sm text-gray-600">{getClientName(order)}</td>
                     )}
                     <td className="px-5 py-4 text-sm text-gray-600">{order.createdAt}</td>
                     <td className="px-5 py-4 text-sm text-gray-600">{order.itemCount ?? (order.items || []).length} ítem(s)</td>

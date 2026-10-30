@@ -20,7 +20,7 @@ router.post('/', requireRole('admin', 'advisor', 'delivery', 'client'), async (r
 
   try {
     const { rows: orderRows } = await pool.query(
-      `SELECT o.id, o.advisor_id, o.delivery_id, uc.company_id, uc.sucursal_id AS client_sucursal_id
+      `SELECT o.id, o.advisor_id, o.delivery_id, o.sucursal_id, uc.company_id
          FROM orders o
          JOIN users uc ON uc.id = o.client_id
          WHERE o.id = $1`,
@@ -44,7 +44,7 @@ router.post('/', requireRole('admin', 'advisor', 'delivery', 'client'), async (r
       if (clientRole === 'creador_pedidos') {
         return res.status(403).json({ error: 'creador_pedidos no puede comentar' });
       }
-      if (clientRole === 'supervisor' && order.client_sucursal_id !== sucursalId) {
+      if (clientRole === 'supervisor' && order.sucursal_id !== sucursalId) {
         return res.status(403).json({ error: 'Pedido pertenece a otra sucursal' });
       }
     }

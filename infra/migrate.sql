@@ -633,6 +633,22 @@ ALTER TABLE order_item_changes ADD  CONSTRAINT chk_oic_action
     CHECK (action IN ('updated', 'removed', 'added'));
 
 -- ----------------------------------------------------------
+-- 24. Sucursal propia del pedido (migración 022):
+--     orders.sucursal_id (antes se derivaba del creador). El
+--     administrador_contrato puede pedir a nombre de otra sucursal.
+-- ----------------------------------------------------------
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS sucursal_id INTEGER
+    REFERENCES sucursales(id) ON DELETE RESTRICT;
+
+UPDATE orders o
+   SET sucursal_id = u.sucursal_id
+  FROM users u
+ WHERE u.id = o.client_id
+   AND o.sucursal_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_orders_sucursal ON orders(sucursal_id);
+
+-- ----------------------------------------------------------
 -- Función auxiliar: generar ID de pedido (ORD-00001)
 -- ----------------------------------------------------------
 CREATE OR REPLACE FUNCTION fn_generate_order_id()

@@ -315,6 +315,8 @@ Requiere rol `client`. Retorna solo productos activos con precio resuelto según
 |--------------|------------------------------------------|
 | `search`     | Búsqueda por nombre o SKU                |
 | `categoryId` | Filtrar por categoría                    |
+| `ids`        | Solo estos productos (`1,2,3`); se usa para recotizar el carrito |
+| `sucursalId` | Solo `administrador_contrato`: precios de esa sucursal de su empresa (activa). Otro rol con sucursal ajena → 403 |
 | `page`       | Número de página (default: 1)            |
 | `limit`      | Resultados por página (default: 24)      |
 
@@ -387,6 +389,10 @@ Crea un pedido. Solo clientes con `clientRole = 'creador_pedidos'`.
 ```
 
 El backend verifica precios en el momento de crear el pedido (no confía en el total del frontend).
+
+**Pedido a nombre de una sucursal (`administrador_contrato`):** el body admite `"sucursalId": 7` (sucursal activa de su empresa). El pedido queda con `orders.sucursal_id` = esa sucursal (lista de precios, asesor y supervisor que aprueba son los de esa sucursal) y `client_id` = el administrador (autor). El resto del flujo no cambia: nace `Pendiente por aprobar` y lo aprueba el supervisor de la sucursal o el administrador de contrato. Sin `sucursalId` el pedido queda en la sucursal del usuario. Errores: sucursal de otra empresa, inactiva o inválida → 422; otro rol con sucursal ajena → 403.
+
+Los listados y el detalle (`GET /orders`, `GET /orders/:id`) incluyen `sucursalId` (sucursal del pedido).
 
 ### `PUT /orders/:id`
 Actualiza estado, asesor, repartidor, notas o transportista.

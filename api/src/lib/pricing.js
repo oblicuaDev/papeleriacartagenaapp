@@ -85,30 +85,36 @@ export async function resolvePriceListId({ companyId, userId, override } = {}, d
  *   Cuando se implemente, devolver tambien `deliveryId` y aplicarlo en
  *   POST /orders junto con advisorId.
  *
- * @returns {Promise<{ priceListId: number|null, priceListChain: number[], advisorId: number|null }>}
+ * sucursalId: sucursal a nombre de la cual queda el pedido. Si es distinta a
+ * la del usuario (administrador_contrato pidiendo para otra sucursal), manda
+ * la sucursal destino y se omite la lista personal del usuario.
+ *
+ * @returns {Promise<{ priceListId: number|null, priceListChain: number[], advisorId: number|null, sucursalId: number|null }>}
  */
-export async function resolveOrderRouting(userId, db = pool) {
-  if (!userId) return { priceListId: null, priceListChain: [], advisorId: null };
+export async function resolveOrderRouting(userId, db = pool, sucursalId = null) {
+  if (!userId) return { priceListId: null, priceListChain: [], advisorId: null, sucursalId: null };
 
   const { rows } = await db.query(
-    `SELECT s.price_list_id AS sucursal_pl,
+    `SELECT COALESCE($2::int, u.sucursal_id) AS sucursal_id,
+            s.price_list_id AS sucursal_pl,
             c.price_list_id AS company_pl,
-            u.price_list_id AS user_pl,
+            ${USER_PL_UNLESS_OTHER_SUCURSAL} AS user_pl,
             s.advisor_id    AS sucursal_advisor,
             c.advisor_id    AS company_advisor
        FROM users u
-       LEFT JOIN sucursales s ON s.id = u.sucursal_id
+       LEFT JOIN sucursales s ON s.id = COALESCE($2::int, u.sucursal_id)
        LEFT JOIN companies  c ON c.id = u.company_id
       WHERE u.id = $1`,
-    [userId]
+    [userId, sucursalId]
   );
-  if (!rows[0]) return { priceListId: null, priceListChain: [], advisorId: null };
+  if (!rows[0]) return { priceListId: null, priceListChain: [], advisorId: null, sucursalId: null };
 
   const chain = dedupeIds([rows[0].sucursal_pl, rows[0].company_pl, rows[0].user_pl]);
   return {
     priceListId:    chain[0] || null,
     priceListChain: chain,
     advisorId:      rows[0].sucursal_advisor || rows[0].company_advisor || null,
+    sucursalId:     rows[0].sucursal_id,
   };
 }
 
@@ -116,8 +122,9 @@ export async function resolveOrderRouting(userId, db = pool) {
  * Resuelve la cadena de listas aplicables a un usuario / empresa.
  * Devuelve un array ordenado [sucursal, company, user] sin nulls ni duplicados.
  * Si se pasa override, retorna [override] (gana prioridad absoluta).
+ * sucursalId: sucursal destino del pedido (ver resolveOrderRouting).
  */
-export async function resolvePriceListChain({ companyId, userId, override } = {}, db = pool) {
+export async function resolvePriceListChain({ companyId, userId, override, sucursalId = null } = {}, db = pool) {
   if (override) {
     const id = parseInt(override);
     return Number.isFinite(id) ? [id] : [];
@@ -127,12 +134,12 @@ export async function resolvePriceListChain({ companyId, userId, override } = {}
     const { rows } = await db.query(
       `SELECT s.price_list_id AS sucursal_pl,
               c.price_list_id AS company_pl,
-              u.price_list_id AS user_pl
+              ${USER_PL_UNLESS_OTHER_SUCURSAL} AS user_pl
          FROM users u
-         LEFT JOIN sucursales s ON s.id = u.sucursal_id
+         LEFT JOIN sucursales s ON s.id = COALESCE($2::int, u.sucursal_id)
          LEFT JOIN companies  c ON c.id = u.company_id
         WHERE u.id = $1`,
-      [userId]
+      [userId, sucursalId]
     );
     if (rows[0]) {
       return dedupeIds([rows[0].sucursal_pl, rows[0].company_pl, rows[0].user_pl]);
@@ -147,6 +154,43 @@ export async function resolvePriceListChain({ companyId, userId, override } = {}
     if (rows[0]?.price_list_id) return [rows[0].price_list_id];
   }
   return [];
+}
+
+// La lista personal del usuario solo aplica cuando el pedido es para su propia
+// sucursal ($2 = sucursal destino, NULL = la del usuario).
+const USER_PL_UNLESS_OTHER_SUCURSAL =
+  `CASE WHEN $2::int IS NULL OR $2::int = u.sucursal_id THEN u.price_list_id END`;
+
+/**
+ * Sucursal a nombre de la cual se crea un pedido (o se cotiza el catalogo).
+ * Solo administrador_contrato puede elegir otra sucursal de su empresa; para
+ * el resto de roles (o sin eleccion) es la sucursal del propio usuario.
+ *
+ * Devuelve sucursalId = null cuando aplica la sucursal propia del usuario
+ * (el routing la toma de users.sucursal_id, como siempre).
+ *
+ * @returns {Promise<{ sucursalId: number|null } | { status: number, error: string }>}
+ */
+export async function resolveTargetSucursal(user, requested, db = pool) {
+  if (requested === undefined || requested === null || requested === '') {
+    return { sucursalId: null };
+  }
+  const id = Number(requested);
+  if (!Number.isInteger(id) || id <= 0) {
+    return { status: 422, error: 'sucursalId invalido' };
+  }
+  if (id === user.sucursalId) return { sucursalId: null };
+  if (user.role !== 'client' || user.clientRole !== 'administrador_contrato') {
+    return { status: 403, error: 'Solo el administrador de contrato puede pedir a nombre de otra sucursal' };
+  }
+  const { rows } = await db.query(
+    `SELECT id FROM sucursales WHERE id = $1 AND company_id = $2 AND active = true`,
+    [id, user.companyId]
+  );
+  if (!rows[0]) {
+    return { status: 422, error: 'La sucursal no existe, esta inactiva o no pertenece a tu empresa' };
+  }
+  return { sucursalId: id };
 }
 
 function dedupeIds(arr) {

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { priceSqlFragmentChain, resolveOrderRouting, resolveTargetSucursal } from '../lib/pricing.js';
+import { priceSqlFragmentChain, resolveOrderRouting, resolveTargetClient } from '../lib/pricing.js';
 import { ensurePurchaseOrderPdf, loadOrderContext, renderPdfBuffer } from '../lib/purchaseOrderPdf.js';
 import { buildOrderDetailXlsx } from '../lib/orderExport.js';
 import { aggregateOrderIva } from '../lib/iva.js';
@@ -451,11 +451,12 @@ router.get('/:id', async (req, res) => {
 //   - Resuelve precio BACKEND (lib pricing) y lo persiste como frozen en order_items.unit_price
 //   - Si el cliente envia item.unitPrice, valida que coincida con el backend (anti-tamper / cache stale)
 //   - Cliente NUNCA dicta el precio almacenado
-//   - sucursalId (opcional, solo administrador_contrato): el pedido queda a
-//     nombre de esa sucursal (precios, asesor, supervisor que aprueba) y el
-//     administrador figura como autor (client_id).
+//   - clientId (opcional, solo administrador_contrato): el pedido queda a
+//     nombre de ese usuario de su empresa, como si el lo hubiera hecho
+//     (client_id, sucursal, precios, asesor y aprobacion). El log de creacion
+//     registra al administrador que realmente lo creo.
 router.post('/', requireRole('client'), async (req, res) => {
-  const { id: clientId, clientRole, companyId } = req.user;
+  const { id: actorId, clientRole, companyId } = req.user;
 
   // PHASE 3: admin_empresa es READ-ONLY (no crea pedidos)
   if (clientRole === 'admin_empresa') {
@@ -510,11 +511,11 @@ router.post('/', requireRole('client'), async (req, res) => {
   // al asesor ni cuenta para el presupuesto del contrato.
   const initialStatus = 'Pendiente por aprobar';
 
-  let targetSucursalId;
+  let clientId;
   try {
-    const target = await resolveTargetSucursal(req.user, req.body.sucursalId);
+    const target = await resolveTargetClient(req.user, req.body.clientId);
     if (target.error) return res.status(target.status).json({ error: target.error });
-    targetSucursalId = target.sucursalId;
+    clientId = target.clientId ?? actorId;
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Error interno del servidor' });
@@ -528,7 +529,7 @@ router.post('/', requireRole('client'), async (req, res) => {
     const {
       priceListId: orderPriceListId, priceListChain,
       advisorId: orderAdvisorId, sucursalId: orderSucursalId,
-    } = await resolveOrderRouting(clientId, client, targetSucursalId);
+    } = await resolveOrderRouting(clientId, client);
 
     // Params para la query de precios: $1 = productId, $2..$N = chain
     const listIdParams = priceListChain.map((_, i) => `$${i + 2}`);
@@ -634,11 +635,12 @@ router.post('/', requireRole('client'), async (req, res) => {
       );
     }
 
-    // PHASE 4: log de creacion (from_status NULL = evento de creacion)
+    // PHASE 4: log de creacion (from_status NULL = evento de creacion).
+    // changed_by = quien lo creo de verdad (el administrador si suplanto).
     await client.query(
       `INSERT INTO order_status_log (order_id, from_status, to_status, changed_by)
        VALUES ($1, NULL, $2, $3)`,
-      [newId, initialStatus, clientId]
+      [newId, initialStatus, actorId]
     );
 
     await client.query('COMMIT');
@@ -657,6 +659,7 @@ router.post('/', requireRole('client'), async (req, res) => {
       ivaExentoBase: exentoBase,
       priceListId: orderPriceListId,
       advisorId:   orderAdvisorId,
+      clientId,
       sucursalId:  orderSucursalId,
       createdAt:   new Date().toISOString(),
     });

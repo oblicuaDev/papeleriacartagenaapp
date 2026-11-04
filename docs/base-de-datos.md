@@ -199,7 +199,7 @@ UNIQUE `(product_id, price_list_id)` — un precio por producto por lista.
 |---------------|----------------|-----------------------------------------------------------|
 | `id`          | VARCHAR(20) PK | ID generado: `ORD-00001`, `ORD-00002`, ...               |
 | `client_id`   | INTEGER FK     | Usuario cliente que creó el pedido (autor)                |
-| `sucursal_id` | INTEGER FK     | Sucursal a nombre de la cual queda el pedido. Normalmente la del autor; el `administrador_contrato` puede elegir otra de su empresa. Define precios, asesor, supervisor que aprueba, PDF, informes y estadísticas por sucursal |
+| `sucursal_id` | INTEGER FK     | Sucursal del pedido: la del usuario a nombre del cual queda (`client_id`). Pedidos creados antes de la suplantación de usuario pueden tener la sucursal que eligió el `administrador_contrato`. Define precios, asesor, supervisor que aprueba, PDF, informes y estadísticas por sucursal |
 | `advisor_id`  | INTEGER FK     | Asesor asignado (puede ser NULL)                          |
 | `delivery_id` | INTEGER FK     | Repartidor asignado (puede ser NULL)                      |
 | `delivered_by`| INTEGER FK     | Usuario que marcó como entregado                          |

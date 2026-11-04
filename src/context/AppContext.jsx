@@ -241,7 +241,7 @@ export function AppProvider({ children }) {
   }
 
   // Actualiza los precios del carrito ({ [productId]: price }), p. ej. al
-  // cambiar la sucursal destino del pedido (administrador_contrato).
+  // cambiar el usuario a nombre del cual va el pedido (administrador_contrato).
   function repriceCart(priceById) {
     setCart((prev) =>
       prev.map((i) =>
@@ -257,8 +257,8 @@ export function AppProvider({ children }) {
   // mismatches con 409. Mandamos unitPrice solo como verificacion: si el
   // backend ve algo distinto, lanza error y mostramos al usuario que el
   // precio cambio.
-  // sucursalId: solo administrador_contrato, pedido a nombre de otra sucursal.
-  async function submitOrder(_clientId, _advisorId, notes, sucursalId) {
+  // onBehalfOfId: solo administrador_contrato, pedido a nombre de otro usuario.
+  async function submitOrder(_clientId, _advisorId, notes, onBehalfOfId) {
     const items = cart.map((i) => ({
       productId: i.productId,
       quantity: i.quantity,
@@ -267,7 +267,7 @@ export function AppProvider({ children }) {
     const created = await ordersApi.create({
       notes,
       items,
-      ...(sucursalId ? { sucursalId } : {}),
+      ...(onBehalfOfId ? { clientId: onBehalfOfId } : {}),
     });
     setOrders((prev) => [created, ...prev]);
     clearCart();

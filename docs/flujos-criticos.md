@@ -37,13 +37,13 @@ sequenceDiagram
 - El backend valida y recalcula los precios (no confía en el total del frontend)
 - Si el cliente tiene `clientRole = 'creador_pedidos'` y hay supervisor, el status inicial puede ser `Pendiente por aprobar`
 - El ID del pedido se genera en PostgreSQL con `fn_generate_order_id()`
-- El pedido guarda su sucursal (`orders.sucursal_id`). El `administrador_contrato` puede elegir en "Confirmar pedido" cualquier sucursal de su empresa: el carrito se recotiza con la lista de esa sucursal, el pedido queda a nombre de ella (asesor, supervisor que aprueba, PDF, informes) y el administrador figura como autor. El resto del flujo no cambia.
+- El pedido guarda su sucursal (`orders.sucursal_id`). El `administrador_contrato` puede elegir en "Confirmar pedido" ("Pedido a nombre de") cualquier usuario de su empresa que haga pedidos y suplantarlo: el carrito se recotiza con los precios de ese usuario y el pedido queda a su nombre, como si él lo hubiera hecho (sucursal, asesor, supervisor que aprueba, PDF, informes). El historial registra al administrador como quien lo creó. El resto del flujo no cambia.
 
 ---
 
 ## 2. Flujo de aprobación (supervisor)
 
-Aplica cuando `clientRole = 'creador_pedidos'` y existe un supervisor en la misma sucursal. La sucursal que cuenta es la del pedido (`orders.sucursal_id`): un pedido creado por el administrador de contrato a nombre de una sucursal lo puede aprobar el supervisor de esa sucursal o el propio administrador.
+Aplica cuando `clientRole = 'creador_pedidos'` y existe un supervisor en la misma sucursal. La sucursal que cuenta es la del pedido (`orders.sucursal_id`): un pedido creado por el administrador de contrato a nombre de un usuario lo puede aprobar el supervisor de la sucursal de ese usuario o el propio administrador.
 
 ```mermaid
 stateDiagram-v2

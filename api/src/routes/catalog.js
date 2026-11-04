@@ -1,14 +1,15 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { resolvePriceListChain, priceSqlFragmentChain, resolveTargetSucursal } from '../lib/pricing.js';
+import { resolvePriceListChain, priceSqlFragmentChain, resolveTargetClient } from '../lib/pricing.js';
 import { resolveActiveContractProductIds } from '../lib/contracts.js';
 
 const router = Router();
 router.use(requireAuth, requireRole('client'));
 
 // GET /catalog
-//   sucursalId (opcional, solo administrador_contrato): precios de esa sucursal
+//   clientId (opcional, solo administrador_contrato): precios de ese usuario
+//   de su empresa (pedido a su nombre)
 //   ids (opcional, "1,2,3"): solo esos productos (recotizar el carrito)
 router.get('/', async (req, res) => {
   const { id: userId, companyId } = req.user;
@@ -18,10 +19,10 @@ router.get('/', async (req, res) => {
   const offset = (pageNum - 1) * limitNum;
 
   try {
-    const target = await resolveTargetSucursal(req.user, req.query.sucursalId);
+    const target = await resolveTargetClient(req.user, req.query.clientId);
     if (target.error) return res.status(target.status).json({ error: target.error });
 
-    const chain = await resolvePriceListChain({ companyId, userId, sucursalId: target.sucursalId });
+    const chain = await resolvePriceListChain({ companyId, userId: target.clientId ?? userId });
     const priceListId = chain[0] || null;
 
     let priceListName = null;

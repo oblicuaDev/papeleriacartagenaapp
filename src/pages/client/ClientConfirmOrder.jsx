@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, Trash2, CheckCircle, ArrowLeft, FileText, Save, Building2 } from 'lucide-react';
+import { ShoppingCart, Trash2, CheckCircle, ArrowLeft, FileText, Save, UserCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import QuantityInput from '../../components/QuantityInput';
@@ -12,42 +12,51 @@ export default function ClientConfirmOrder() {
   const { currentUser } = useAuth();
   const {
     cart, cartTotal, cartSubtotal, cartIva, cartIva5, cartIva19, cartExentoBase,
-    updateCartItem, removeFromCart, submitOrder, refreshProducts, repriceCart, companies,
+    updateCartItem, removeFromCart, submitOrder, refreshProducts, repriceCart, companies, users,
   } = useApp();
   const [notes, setNotes] = useState('');
   const [submitted, setSubmitted] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
 
-  // administrador_contrato puede hacer el pedido a nombre de cualquier sucursal
-  // de su empresa: el pedido queda en esa sucursal (precios, asesor y
-  // aprobacion) y el administrador figura como autor.
+  // administrador_contrato puede hacer el pedido a nombre de otro usuario de su
+  // empresa (lo suplanta): el pedido queda como si ese usuario lo hubiera hecho
+  // (autor, sucursal, precios, asesor y aprobacion).
   const isAdminContrato = currentUser?.clientRole === 'administrador_contrato';
-  const sucursales = isAdminContrato
-    ? (companies.find(c => c.id === currentUser?.companyId)?.sucursales || []).filter(s => s.active !== false)
+  const orderingUsers = isAdminContrato
+    ? (users || [])
+        .filter(u =>
+          u.role === 'client' &&
+          u.companyId === currentUser?.companyId &&
+          u.active !== false &&
+          ['creador_pedidos', 'supervisor', 'administrador_contrato'].includes(u.clientRole))
+        .sort((a, b) => a.name.localeCompare(b.name, 'es'))
     : [];
-  const [sucursalId, setSucursalId] = useState(String(currentUser?.sucursalId ?? ''));
+  const [onBehalfOfId, setOnBehalfOfId] = useState(String(currentUser?.id ?? ''));
   const [repricing, setRepricing] = useState(false);
+  const onBehalfOf = orderingUsers.find(u => String(u.id) === onBehalfOfId);
+  const onBehalfOfSucursal = (companies.find(c => c.id === currentUser?.companyId)?.sucursales || [])
+    .find(s => s.id === onBehalfOf?.sucursalId)?.name;
 
-  // Precios del carrito segun la sucursal elegida (el backend valida contra
+  // Precios del carrito segun el usuario elegido (el backend valida contra
   // esa misma lista al crear el pedido).
   const cartIdsKey = cart.map(i => i.productId).sort((a, b) => a - b).join(',');
-  const loadSucursalPrices = useCallback(async () => {
-    if (!isAdminContrato || !sucursalId || !cartIdsKey) return;
+  const loadClientPrices = useCallback(async () => {
+    if (!isAdminContrato || !onBehalfOfId || !cartIdsKey) return;
     setRepricing(true);
     try {
-      const res = await catalogApi.list({ sucursalId, ids: cartIdsKey, limit: 1000 });
+      const res = await catalogApi.list({ clientId: onBehalfOfId, ids: cartIdsKey, limit: 1000 });
       const priceById = {};
       for (const p of res?.data || []) priceById[p.id] = Number(p.price);
       repriceCart(priceById);
     } catch (err) {
-      setErrorMsg(err?.message || 'No se pudieron cargar los precios de la sucursal');
+      setErrorMsg(err?.message || 'No se pudieron cargar los precios del usuario');
     } finally {
       setRepricing(false);
     }
-  }, [isAdminContrato, sucursalId, cartIdsKey]);
+  }, [isAdminContrato, onBehalfOfId, cartIdsKey]);
 
-  useEffect(() => { loadSucursalPrices(); }, [loadSucursalPrices]);
+  useEffect(() => { loadClientPrices(); }, [loadClientPrices]);
 
   // "Guardar borrador" = dejar el carrito como está y volver al catálogo.
   // El carrito se conserva solo (localStorage), no se crea ningún pedido.
@@ -61,14 +70,14 @@ export default function ClientConfirmOrder() {
     try {
       const orderId = await submitOrder(
         currentUser.id, null, notes,
-        isAdminContrato && sucursalId ? Number(sucursalId) : undefined,
+        isAdminContrato && onBehalfOfId ? Number(onBehalfOfId) : undefined,
       );
       setSubmitted(orderId);
     } catch (err) {
       // Backend rechazo el pedido. Distinguimos mismatches de precio (409 con detail).
       if (err?.status === 409 && Array.isArray(err?.data?.mismatches)) {
         await refreshProducts?.();
-        await loadSucursalPrices();
+        await loadClientPrices();
         const lines = err.data.mismatches.map(m =>
           `• ${m.productName}: pediste $${m.clientPrice}, ahora cuesta $${m.backendPrice}`
         ).join('\n');
@@ -148,27 +157,28 @@ export default function ClientConfirmOrder() {
         </div>
       </div>
 
-      {/* Sucursal destino — solo administrador_contrato */}
-      {isAdminContrato && sucursales.length > 0 && (
+      {/* Usuario a nombre del cual va el pedido — solo administrador_contrato */}
+      {isAdminContrato && orderingUsers.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
           <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
-            <Building2 className="w-4 h-4 text-blue-700" />
-            Sucursal del pedido
+            <UserCircle className="w-4 h-4 text-blue-700" />
+            Pedido a nombre de
           </label>
           <select
-            value={sucursalId}
-            onChange={e => { setErrorMsg(null); setSucursalId(e.target.value); }}
+            value={onBehalfOfId}
+            onChange={e => { setErrorMsg(null); setOnBehalfOfId(e.target.value); }}
             disabled={submitting || repricing}
             className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
           >
-            {sucursales.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.name}{s.id === currentUser?.sucursalId ? ' (mi sucursal)' : ''}
+            {orderingUsers.map(u => (
+              <option key={u.id} value={u.id}>
+                {u.name}{u.id === currentUser?.id ? ' (yo)' : ''}
               </option>
             ))}
           </select>
           <p className="text-xs text-gray-400 mt-2">
-            El pedido queda a nombre de esta sucursal (precios, asesor y aprobación) y tú como autor.
+            El pedido queda a nombre de este usuario, como si él lo hubiera hecho
+            {onBehalfOfSucursal ? ` (sucursal ${onBehalfOfSucursal})` : ''}: sus precios, su asesor y su aprobación.
           </p>
         </div>
       )}

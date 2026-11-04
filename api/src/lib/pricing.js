@@ -85,9 +85,10 @@ export async function resolvePriceListId({ companyId, userId, override } = {}, d
  *   Cuando se implemente, devolver tambien `deliveryId` y aplicarlo en
  *   POST /orders junto con advisorId.
  *
- * sucursalId: sucursal a nombre de la cual queda el pedido. Si es distinta a
- * la del usuario (administrador_contrato pidiendo para otra sucursal), manda
- * la sucursal destino y se omite la lista personal del usuario.
+ * sucursalId: sucursal del pedido (orders.sucursal_id). Si es distinta a la
+ * del usuario (pedidos que un administrador_contrato creo a nombre de otra
+ * sucursal antes de pedir a nombre de un usuario), manda esa sucursal y se
+ * omite la lista personal del usuario.
  *
  * @returns {Promise<{ priceListId: number|null, priceListChain: number[], advisorId: number|null, sucursalId: number|null }>}
  */
@@ -122,7 +123,7 @@ export async function resolveOrderRouting(userId, db = pool, sucursalId = null) 
  * Resuelve la cadena de listas aplicables a un usuario / empresa.
  * Devuelve un array ordenado [sucursal, company, user] sin nulls ni duplicados.
  * Si se pasa override, retorna [override] (gana prioridad absoluta).
- * sucursalId: sucursal destino del pedido (ver resolveOrderRouting).
+ * sucursalId: sucursal del pedido (ver resolveOrderRouting).
  */
 export async function resolvePriceListChain({ companyId, userId, override, sucursalId = null } = {}, db = pool) {
   if (override) {
@@ -156,41 +157,47 @@ export async function resolvePriceListChain({ companyId, userId, override, sucur
   return [];
 }
 
-// La lista personal del usuario solo aplica cuando el pedido es para su propia
-// sucursal ($2 = sucursal destino, NULL = la del usuario).
+// La lista personal del usuario solo aplica cuando el pedido es de su propia
+// sucursal ($2 = sucursal del pedido, NULL = la del usuario).
 const USER_PL_UNLESS_OTHER_SUCURSAL =
   `CASE WHEN $2::int IS NULL OR $2::int = u.sucursal_id THEN u.price_list_id END`;
 
+// Sub-roles cliente que crean pedidos (admin_empresa es solo lectura).
+export const ORDERING_CLIENT_ROLES = ['creador_pedidos', 'supervisor', 'administrador_contrato'];
+
 /**
- * Sucursal a nombre de la cual se crea un pedido (o se cotiza el catalogo).
- * Solo administrador_contrato puede elegir otra sucursal de su empresa; para
- * el resto de roles (o sin eleccion) es la sucursal del propio usuario.
+ * Usuario a nombre del cual se crea un pedido (o se cotiza el catalogo).
+ * Solo administrador_contrato puede suplantar a otro usuario cliente activo de
+ * su empresa: el pedido queda como si ese usuario lo hubiera hecho (autor,
+ * sucursal, precios, asesor y aprobacion). Para el resto de roles (o sin
+ * eleccion) es el propio usuario.
  *
- * Devuelve sucursalId = null cuando aplica la sucursal propia del usuario
- * (el routing la toma de users.sucursal_id, como siempre).
+ * Devuelve clientId = null cuando aplica el propio usuario.
  *
- * @returns {Promise<{ sucursalId: number|null } | { status: number, error: string }>}
+ * @returns {Promise<{ clientId: number|null } | { status: number, error: string }>}
  */
-export async function resolveTargetSucursal(user, requested, db = pool) {
+export async function resolveTargetClient(user, requested, db = pool) {
   if (requested === undefined || requested === null || requested === '') {
-    return { sucursalId: null };
+    return { clientId: null };
   }
   const id = Number(requested);
   if (!Number.isInteger(id) || id <= 0) {
-    return { status: 422, error: 'sucursalId invalido' };
+    return { status: 422, error: 'clientId invalido' };
   }
-  if (id === user.sucursalId) return { sucursalId: null };
+  if (id === user.id) return { clientId: null };
   if (user.role !== 'client' || user.clientRole !== 'administrador_contrato') {
-    return { status: 403, error: 'Solo el administrador de contrato puede pedir a nombre de otra sucursal' };
+    return { status: 403, error: 'Solo el administrador de contrato puede hacer pedidos a nombre de otro usuario' };
   }
   const { rows } = await db.query(
-    `SELECT id FROM sucursales WHERE id = $1 AND company_id = $2 AND active = true`,
-    [id, user.companyId]
+    `SELECT id FROM users
+      WHERE id = $1 AND company_id = $2 AND role = 'client' AND active = true
+        AND client_role = ANY($3::text[])`,
+    [id, user.companyId, ORDERING_CLIENT_ROLES]
   );
   if (!rows[0]) {
-    return { status: 422, error: 'La sucursal no existe, esta inactiva o no pertenece a tu empresa' };
+    return { status: 422, error: 'El usuario no existe, esta inactivo, no hace pedidos o no pertenece a tu empresa' };
   }
-  return { sucursalId: id };
+  return { clientId: id };
 }
 
 function dedupeIds(arr) {

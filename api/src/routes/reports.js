@@ -37,6 +37,13 @@ const SCOPED_DATASETS = ['orders', 'order_items'];
 
 const MONEY = '"$"#,##0';
 
+// Discriminacion de IVA por linea de pedido. Los precios ya traen IVA incluido:
+// misma formula que splitIvaRate (lib/iva.js), asi base + IVA = total de la
+// linea y la suma de las lineas cuadra con el IVA del pedido. Tasa 0 = exenta.
+const IVA_DIVISOR = '(1 + oi.iva_rate::numeric / 100)';
+const LINE_TOTAL = '(oi.unit_price::numeric * oi.quantity)';
+const LINE_BASE = `ROUND(${LINE_TOTAL} / ${IVA_DIVISOR}, 2)`;
+
 // Helpers de filtro: reciben (valor, paramsArray) y devuelven el fragmento SQL.
 const eqInt = (col) => (v, p) => `${col} = $${p.push(parseInt(v, 10))}`;
 const eqText = (col) => (v, p) => `${col} = $${p.push(String(v))}`;
@@ -118,8 +125,11 @@ const DATASETS = {
       gran_categoria: { header: 'Gran categoría', sql: 'gc.name' },
       quantity:       { header: 'Cantidad',    sql: 'oi.quantity' },
       unit:           { header: 'Unidad',      sql: 'oi.unit' },
+      unit_price_net: { header: 'P. Unit sin IVA (COP)', sql: `ROUND(oi.unit_price::numeric / ${IVA_DIVISOR}, 2)::float`, numFmt: MONEY },
       iva_rate:       { header: 'IVA %',       sql: 'oi.iva_rate::float' },
       unit_price:     { header: 'P. Unit (COP)', sql: 'oi.unit_price::float', numFmt: MONEY },
+      line_base:      { header: 'Base gravable / exenta (COP)', sql: `${LINE_BASE}::float`, numFmt: MONEY },
+      line_iva:       { header: 'IVA línea (COP)', sql: `(${LINE_TOTAL} - ${LINE_BASE})::float`, numFmt: MONEY },
       line_total:     { header: 'Total línea (COP)', sql: '(oi.unit_price * oi.quantity)::float', numFmt: MONEY },
     },
     filters: {
